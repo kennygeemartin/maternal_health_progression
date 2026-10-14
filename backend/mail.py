@@ -53,6 +53,8 @@ def queue(db, user, pid, kind, subject, body, identity):
     key = hashlib.sha256(f"{user.id}:{pid}:{kind}:{identity}".encode()).hexdigest()
     existing = db.scalar(select(EmailJob).where(EmailJob.dedupe_key == key))
     if existing:
+        if kind == "monthly_guidance" and existing.status in {"pending", "failed", "cancelled"} and not existing.attempts:
+            existing.subject, existing.body = subject, body
         if existing.status == "cancelled" and kind == "monthly_guidance" and not existing.provider_id:
             existing.status = "pending"
         return existing
@@ -67,6 +69,7 @@ def queue(db, user, pid, kind, subject, body, identity):
 
 def summary(job):
     return {"id": job.id, "kind": job.kind, "status": job.status,
+            "subject": job.subject,
             "error_code": job.error_code, "created_at": job.created_at}
 
 def dispatch(db, job):

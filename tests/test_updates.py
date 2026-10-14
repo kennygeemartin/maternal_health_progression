@@ -37,6 +37,9 @@ def test_month_email_verification_deduplication_and_optout(monkeypatch):
         token=re.search(r'email_token=([\w-]+)',sent[0][2]).group(1)
         assert client.post('/api/email/verify',headers=HEADERS,json={'token':token}).status_code==200
         assert len(sent)==2 and 'month 5' in sent[1][2].lower()
+        assert sent[1][2].startswith('Hello Synthetic Test,')
+        assert 'does not replace' not in sent[1][2]
+        assert 'midwife or doctor' in sent[1][2]
         assert client.post('/api/email/verify',headers=HEADERS,json={'token':token}).status_code==400
         assert client.post(route+'/email-guidance',headers=HEADERS).json()['status']=='accepted'
         assert len(sent)==2
@@ -102,7 +105,9 @@ def test_external_consent_and_risk_email(monkeypatch):
         result=client.post(f'/api/observations/{oid}/predict',headers=HEADERS)
         assert result.status_code==200 and result.json()['category']=='high'
         assert len(calls)==1 and len(sent)==2
-        assert 'risk' in sent[-1][2] and '135.1365' not in sent[-1][2]
+        assert 'midwife or doctor' in sent[-1][2] and '135.1365' not in sent[-1][2]
+        assert 'not a diagnosis' not in sent[-1][2]
+        assert sent[-1][2].endswith('discuss your next steps.')
         assert client.post(f'/api/observations/{oid}/predict',headers=HEADERS).status_code==200
         assert len(sent)==2
 
@@ -147,7 +152,34 @@ def test_celsius_records_units_and_provider_conversion():
         assert hosted_model.feature_payload(stored)['BodyTemp']==pytest.approx(98.6)
         bad={**payload,'units':{**units,'BodyTempC':'degF'}}
         assert client.post(route,headers=HEADERS,json=bad).status_code==422
+
         bad={**payload,'values':{**values,'BodyTempC':98.6}}
         assert client.post(route,headers=HEADERS,json=bad).status_code==422
         bad={**payload,'values':{**values,'BodyTempF':98.6},'units':{**units,'BodyTempF':'degF'}}
         assert client.post(route,headers=HEADERS,json=bad).status_code==422
+
+def test_guidance_email_preserves_urgent_instructions_and_closes_with_visit_advice():
+    from backend.guidance_service import email_content
+    from backend.notification_messages import VISIT_RECOMMENDATION
+    entries=[{'id':1,'month':8,'title':'Baby movements','body':'Contact your maternity team immediately if movements change. Do not wait for an email or an app prediction.\n\nMonth labels are approximate. Follow your care team\'s personalised advice.','source_url':'https://example.invalid/approved-source'}]
+    subject,body,identity=email_content(8,entries,'Test Mother')
+    assert 'pregnancy month 8' in subject
+    assert 'Contact your maternity team immediately if movements change.' in body
+    assert 'Do not wait for an email or an app prediction.' in body
+    assert 'Month labels are approximate' not in body
+    assert body.endswith(VISIT_RECOMMENDATION)
+    assert entries[0]['body'].endswith('personalised advice.')
+    assert email_content(8,entries,'Another Name')[2]==identity
+
+def test_refresh_only_unattempted_pending_guidance():
+    with TestClient(app) as client:
+        pid=setup(client,'pending-copy@example.invalid')
+        with SessionLocal() as db:
+            user=db.scalar(select(User).where(User.email=='pending-copy@example.invalid'))
+            job=mail.queue(db,user,pid,'monthly_guidance','Old subject','Old copy','same-guidance')
+            db.commit()
+            refreshed=mail.queue(db,user,pid,'monthly_guidance','Warm subject','Warm copy','same-guidance')
+            assert refreshed.id==job.id and refreshed.body=='Warm copy'
+            refreshed.status='failed';refreshed.attempts=1;db.commit()
+            retry=mail.queue(db,user,pid,'monthly_guidance','Another subject','Different copy','same-guidance')
+            assert retry.id==job.id and retry.body=='Warm copy'

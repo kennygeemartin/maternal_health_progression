@@ -20,6 +20,7 @@ from .database import (initialize_database, SessionLocal, User, LoginSession, Pr
                        PregnancyPreferences, GuidanceMonth, EmailVerification, EmailJob, now)
 from . import inference
 from . import hosted_model, guidance_service, mail, monthly_catalog
+from . import notification_messages
 
 SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 if os.getenv("APP_ENV") == "production" and not SECURE:
@@ -206,7 +207,7 @@ def queue_monthly(db, user, pregnancy):
     entries = guidance_service.content(db, preference.month, prediction.result["category"] if prediction else "all")
     if not entries:
         return None, "no_reviewed_guidance"
-    subject, body, identity = guidance_service.email_content(preference.month, entries)
+    subject, body, identity = guidance_service.email_content(preference.month, entries, user.name)
     return mail.queue(db, user, pregnancy.id, "monthly_guidance", subject, body, identity), "queued"
 
 def verification_message(db, user, pregnancy):
@@ -227,7 +228,7 @@ def verification_message(db, user, pregnancy):
     verification.expires_at, verification.requested_at = now() + timedelta(hours=24), now()
     link = mail.public_url() + "/?email_token=" + token
     job = mail.queue(db, user, pregnancy.id, "verification", "Verify your Bloom email address",
-                    "Confirm that this is your email address to receive the updates you selected in Bloom.\n\n" + link +
+                    "Welcome to Bloom. Confirm your email address to receive pregnancy guidance and care updates.\n\n" + link +
                     "\n\nThis link expires in 24 hours. If you did not request it, you can ignore this email.", verification.token_hash)
     db.commit()
     return mail.dispatch(db, job)
@@ -279,7 +280,7 @@ def verify_email(data: VerificationInput, db: DB):
     # Remaining jobs are picked up by the authenticated daily worker.
     for job in jobs[:2]:
         mail.dispatch(db, job)
-    return {"verified": True, "message": "Email verified. Your selected guidance is queued for delivery."}
+    return {"verified": True, "message": "Your email is confirmed. Your pregnancy guidance is ready for delivery."}
 
 @app.post("/api/pregnancies/{pid}/email-guidance")
 def email_guidance(pid: int, db: DB, user: AUTH):
@@ -400,16 +401,15 @@ def predict(oid: int, db: DB, user: AUTH):
         db.rollback()
         return db.scalar(select(Prediction).where(Prediction.observation_id == oid)).result
     needs_review = result["category"] in {"mid", "high"} or result.get("review_required", False)
-    message = result.get("review_message") or "An elevated research risk estimate was recorded. Contact your maternity care team to review these measurements. This estimate is not a diagnosis."
+    message = notification_messages.care_update(result)
     if needs_review:
         db.add(Notification(user_id=user.id, pregnancy_id=observation.pregnancy_id, prediction_id=prediction.id,
                             message=message))
     audit(db, user, "prediction.create", prediction.id)
     db.commit()
     if needs_review and preference and preference.email_enabled and mail.verified(db, user.id):
-        job = mail.queue(db, user, observation.pregnancy_id, "risk_alert", "Bloom: please review your assessment",
-            message + " " +
-            "Sign in to Bloom for details. This estimate is not a diagnosis. You can turn off emails in your pregnancy preferences.",
+        subject, body = notification_messages.care_email(result, user.name)
+        job = mail.queue(db, user, observation.pregnancy_id, "risk_alert", subject, body,
             f"prediction:{prediction.id}")
         db.commit()
         mail.dispatch(db, job)
@@ -420,6 +420,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
     p = owned(db, user, pid)
     observations = list(db.scalars(select(Observation).where(Observation.pregnancy_id == pid).order_by(Observation.observed_at, Observation.id)))
     predictions = {x.observation_id: x for x in db.scalars(select(Prediction).where(Prediction.pregnancy_id == pid))}
+    prediction_results = {x.id: x.result for x in predictions.values()}
     latest = predictions.get(observations[-1].id) if observations else None
     category = latest.result["category"] if latest else "all"
     month = guidance_service.selected_month(db, p)
@@ -435,7 +436,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
                         "remote_model": hosted_model.metadata() if hosted_model.configured() else None,
                         "assessment_model": inference.metadata()},
         "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
-        "notifications": [{"id": n.id, "message": n.message, "read": n.read, "created_at": n.created_at}
+        "notifications": [{"id": n.id, "message": notification_messages.care_update(prediction_results[n.prediction_id]) if n.prediction_id in prediction_results else n.message, "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
 
 @app.patch("/api/notifications/{nid}/read")
