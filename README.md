@@ -1,8 +1,8 @@
 # Bloom · Maternal health support
 
-**Model activation is blocked by a source-data unit discrepancy.** The saved scaler's training ranges are HbA1c 30–50 and fasting glucose 3.6–8.9, inconsistent with the dataset's percent and mg/dL labels. The app saves observations but returns a clear 503 explanation for assessments. It does not guess conversions. Verify source units with the dataset author, correct and validate preprocessing (or retrain), and replace the guard in `backend/inference.py` as part of a tested model release. Raw `predict_artifact` inference is available only for compatibility tests and is not exposed through the API. Notification and probability workflows are tested with explicitly simulated predictions.
+Responsive maternal health support application with FastAPI, PostgreSQL and a mobile-friendly web interface. Users can choose pregnancy month 1-9, view published monthly guidance, opt into email guidance using their registration address, and enable an external pretrained research assessment. In-app elevated-risk notices remain available.
 
-Responsive web application with a FastAPI REST backend, PostgreSQL-compatible storage and inference using the supplied trained PyTorch model. Includes registration, pregnancy episodes and dating, complete measurement entry, chronological history, probability estimates, in-app referral notifications, reviewed guidance, model registry and administration audit.
+Resend integration is implemented, but live email requires privately configured credentials and a verified sender. The public model is a research service with restricted input ranges and usage quotas; it is not a clinically validated assessment or a longitudinal LSTM replacement. See [hosted model review](docs/hosted-model-review.md).
 
 ## Run locally
 
@@ -22,26 +22,26 @@ To use PostgreSQL, set `DATABASE_URL` before startup:
 $env:DATABASE_URL = 'postgresql+psycopg://maternal:YOUR_PASSWORD@localhost:5432/maternal'
 ```
 
-Alternatively set `POSTGRES_PASSWORD` and run `docker compose up --build`. Create an administrator with `python -m backend.create_admin`, or `docker compose exec app python -m backend.create_admin`. Public registration creates mother accounts only. Administrators create draft content and explicitly publish it after review; no unreviewed clinical guidance is seeded.
+Alternatively set `POSTGRES_PASSWORD` and run `docker compose up --build`. Create an administrator with `python -m backend.create_admin`, or `docker compose exec app python -m backend.create_admin`. Public registration creates mother accounts only. Administrators create draft content and explicitly publish it after review; nine source-based monthly summaries are seeded as published under the project owner's explicit approval. This records publication approval, not an independent clinical review. Existing content is preserved. Admin drafts still require publication.
 
 ## Mobile support
 
-The same interface adapts to phones and tablets. For phone testing, open `http://YOUR_COMPUTER_LAN_IP:8000` on the same network and permit the port in your firewall. HTTPS hosting enables the service worker and home-screen installation where supported. A manifest and shell-only service worker are included. Health records are not cached or stored in browser local storage, and saving requires a network connection. Mobile support is a responsive web app, not a separate native Android/iOS application. Notifications are delivered in the app; SMS, email and background push providers are not configured.
+The same interface adapts to phones and tablets. For phone testing, open `http://YOUR_COMPUTER_LAN_IP:8000` on the same network and permit the port in your firewall. HTTPS hosting enables the service worker and home-screen installation where supported. A manifest and shell-only service worker are included. Health records are not cached or stored in browser local storage, and saving requires a network connection. Mobile support is a responsive web app, not a separate native Android/iOS application. In-app notices and opt-in Resend email delivery are implemented; native push and SMS are not implemented.
 
-## Model compatibility
+## Original local model compatibility
 
 Artifacts stay in `Results/`. The supplied `proposed_lstm.pt` has a single LSTM layer with input size 1, hidden size 50, dropout 0.20 and three output classes. The saved scaler identifies scikit-learn **1.9.0**; the training report identifies PyTorch **2.14.1**. Requirements preserve those versions. If your package mirror does not offer them, obtain the original training environment rather than silently loading the pickle with an incompatible scikit-learn version.
 
-Feature order: Age (years), BodyTempF (°F), HeartRate (bpm), SystolicBP (mmHg), DiastolicBP (mmHg), BMI (kg/m²), HbA1c (%), FastingGlucose (mg/dL). All are required from one visit. Invalid units, missing/nonfinite values, implausible ranges, future timestamps and systolic pressure at or below diastolic pressure are rejected. Bounds are input plausibility checks, not clinical referral thresholds. Out-of-training-range values are flagged without clipping or refitting.
+Feature order: Age (years), BodyTempF (°F), HeartRate (bpm), SystolicBP (mmHg), DiastolicBP (mmHg), BMI (kg/m²), HbA1c (%), FastingGlucose (mg/dL). The hosted model requires six measurements from one visit; BMI and HbA1c are optional records and are not transmitted. The original local artifact expects all eight. Invalid units, missing/nonfinite values, implausible ranges, future timestamps and systolic pressure at or below diastolic pressure are rejected. Bounds are input plausibility checks, not clinical referral thresholds. Out-of-training-range values are flagged without clipping or refitting.
 
-The training code serializes eight **static features as synthetic timesteps** into `[batch, 8, 1]`. This application preserves that behavior. It does not reinterpret visits as model timesteps, invent missing-value masks, or claim longitudinal prediction. True temporal prediction requires a separately trained and validated longitudinal model. Categories use argmax because clinical probability thresholds were not supplied. Registry entries record both artifact hashes, schema, decision rule and research status. Predictions retain their model version and source observation.
+The training code serializes eight **static features as synthetic timesteps** into `[batch, 8, 1]`. Compatibility tests preserve that behavior; live assessments use the external six-input service instead. It does not reinterpret visits as model timesteps, invent missing-value masks, or claim longitudinal prediction. True temporal prediction requires a separately trained and validated longitudinal model. Categories use argmax because clinical probability thresholds were not supplied. Registry entries record both artifact hashes, schema, decision rule and research status. Predictions retain their model version and source observation.
 
 The report gives 76.0% held-out accuracy for this LSTM. This research prototype is not a clinically validated diagnostic device. Clinically reviewed content, referral rules, prospective validation and operating procedures must be supplied before patient-facing deployment.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python -m pytest tests/test_app.py -q
+.venv\Scripts\python -m pytest tests/test_app.py tests/test_updates.py tests/test_postgres.py -q
 ```
 
 Tests cover real artifact inference, probability parity, record validation, account isolation, chronological history, content review gating, notifications and admin permissions. Tests use an isolated in-memory SQLite database. PostgreSQL should additionally be exercised in the target deployment environment.
@@ -57,12 +57,12 @@ PostgreSQL deployments use a dedicated `bloom` schema, created automatically on 
 1. Import the GitHub repository into Vercel with the project root set to the repository root. `pyproject.toml` selects `backend.main:app` explicitly; do not select the separate `app/` implementation.
 2. Connect a PostgreSQL database through Vercel Marketplace (for example Neon). The app accepts `DATABASE_URL` or `POSTGRES_URL` (with `DATABASE_URL` taking priority). Keep required SSL query parameters. Both `postgres://` and `postgresql://` are normalized to the installed psycopg driver.
 3. Set `APP_ENV=production` and `COOKIE_SECURE=true` for deployed environments. Use a separate PostgreSQL database for preview environments. SQLite is deliberately rejected on Vercel because function storage is not persistent.
-4. Enable Fluid compute and, if the dependency bundle exceeds the standard Python limit, enable Large Functions with `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. PyTorch and scientific packages can make the function large. Verify the actual deployment build rather than assuming local Windows package sizes apply to Linux.
-5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. The model-unit guard remains active. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
+4. The lightweight Vercel runtime does not load PyTorch or download external executable model artifacts. External assessment runs at the provider.
+5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. Research assessment requires per-pregnancy consent in Pregnancy settings; unsupported measurements and provider failures remain saved without a prediction. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
 
 The configuration preserves the same-origin frontend/API and FastAPI security middleware. No database credentials or cloud access tokens are included. Vercel account access and a configured database are required to complete a live deployment.
 
-Vercel's default `pyproject.toml` runtime installs the web/backend packages only. Scientific inference dependencies are an optional `model` extra while the unit-verification guard disables predictions; `requirements.txt` still includes them for local artifact tests. A validated model activation must also enable these dependencies in the deployment environment and recheck bundle limits.
+Vercel's default `pyproject.toml` runtime installs the web/backend packages only. Scientific inference dependencies are an optional `model` extra for the blocked original local model; `requirements.txt` still includes them for local artifact tests. A validated model activation must also enable these dependencies in the deployment environment and recheck bundle limits.
 
 References: [FastAPI on Vercel](https://vercel.com/docs/frameworks/backend/fastapi), [PostgreSQL](https://vercel.com/docs/postgres), [Large Functions](https://vercel.com/changelog/vercel-functions-can-now-be-up-to-5-gb-in-package-size-7yAwSyCig0IQDXUIDistvS/eadf06d6c3).
 
@@ -70,4 +70,25 @@ The source repository is https://github.com/kennygeemartin/maternal_health_progr
 
 Use separate databases, credentials and environment variables for dev/test/production. Production requires a PostgreSQL URL, `APP_ENV=production`, `COOKIE_SECURE=true`, and an HTTPS reverse proxy. Authentication uses scrypt password hashes and hashed, revocable HttpOnly sessions. Mutating requests require `X-Bloom-Request: 1`; cross-origin requests are not enabled. API responses use `Cache-Control: no-store`.
 
-Before production, configure ingress rate limits, database backups, monitoring and a migration process. Table creation currently uses SQLAlchemy `create_all`; schema upgrades require explicit migrations. Guidance publishes are audited. Model replacement is an operator-managed artifact release; the interface exposes registry metadata but does not accept executable model uploads. Keep source under version control and run tests in CI. No cloud deployment has been configured.
+Before production, configure ingress rate limits, database backups, monitoring and a migration process. Table creation currently uses SQLAlchemy `create_all`; schema upgrades require explicit migrations. Guidance publishes are audited. Model replacement is an operator-managed artifact release; the interface exposes registry metadata but does not accept executable model uploads. Keep source under version control and run tests in CI. The repository is configured for the existing Vercel project; a successful deployment must still be checked in that account.
+
+## Activate email on Vercel
+
+Set these four variables in Vercel Settings > Environment Variables for Production, then deploy the latest main branch:
+
+| Variable | Value |
+| --- | --- |
+| `RESEND_API_KEY` | A privately generated Resend API key with sending permission |
+| `EMAIL_FROM` | `Bloom <updates@your-verified-domain>` using a domain verified in Resend |
+| `APP_PUBLIC_URL` | The application's production HTTPS URL, without a trailing slash |
+| `CRON_SECRET` | A privately generated random value of at least 32 characters |
+
+Keep all credentials out of GitHub and chat. Resend's default testing sender is unsuitable for emailing arbitrary registered users. Verify your sending domain first. See [Resend sending API](https://resend.com/docs/api-reference/emails/send-email).
+
+In Pregnancy settings, select the month and enable emails. Bloom first sends a non-health mailbox verification link, valid for 24 hours. Opening it verifies the registration address and queues that month's published guidance. Changing month sends the new guidance after verification. Identical month/content messages are deduplicated. Email delivery states distinguish pending, provider accepted, failed, cancelled and operator review; provider acceptance does not confirm inbox delivery. The provider receives the destination address and message content.
+
+The authenticated daily cron runs at 07:00 UTC (08:00 Lagos, subject to provider scheduling precision). It checks up to 25 opted-in episodes fairly and retries up to two queued messages per run; this is a testing-scale worker, not a high-volume or urgent-alert delivery guarantee. User actions also attempt immediate delivery. Users must update their selected month; the app does not automatically change a manually selected month. New published guidance can be queued by cron. Elevated research predictions generate an in-app notice and a generic email only when the user opted in and verified their address. Do not wait for email or prediction when symptoms require care. Opt-out stops future sends.
+
+Resend idempotency keys and persisted claims reduce duplicates. A delivery attempt older than 23 hours requires operator review because the provider idempotency window may have expired. Failed deliveries never become fictitious successful notices. Credentials are not yet supplied, so actual inbox delivery has not been tested.
+
+[Vercel cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs) uses `CRON_SECRET` automatically as a Bearer header. The worker rejects requests without the matching secret.

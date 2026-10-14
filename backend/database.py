@@ -116,3 +116,45 @@ class GuidanceDelivery(Base):
     pregnancy_id: Mapped[int] = mapped_column(ForeignKey("pregnancies.id"))
     guidance_id: Mapped[int] = mapped_column(ForeignKey("guidance.id"))
     delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class PregnancyPreferences(Base):
+    __tablename__ = "pregnancy_preferences"
+    pregnancy_id: Mapped[int] = mapped_column(ForeignKey("pregnancies.id"), primary_key=True)
+    month: Mapped[int]
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    remote_assessment_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class GuidanceMonth(Base):
+    __tablename__ = "guidance_months"
+    guidance_id: Mapped[int] = mapped_column(ForeignKey("guidance.id"), primary_key=True)
+    month: Mapped[int]
+
+class GuidanceSeed(Base):
+    __tablename__ = "guidance_seeds"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    guidance_id: Mapped[int] = mapped_column(ForeignKey("guidance.id"))
+
+class EmailVerification(Base):
+    __tablename__ = "email_verifications"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class EmailJob(Base):
+    __tablename__ = "email_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    pregnancy_id: Mapped[int] = mapped_column(ForeignKey("pregnancies.id"))
+    dedupe_key: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    subject: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(String(30000))
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    provider_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

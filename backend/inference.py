@@ -4,6 +4,7 @@ import json
 import pickle
 from pathlib import Path
 from functools import lru_cache
+from . import hosted_model
 
 ROOT = Path(__file__).resolve().parents[1] / "Results"
 FEATURES = ["Age", "BodyTempF", "HeartRate", "SystolicBP", "DiastolicBP", "BMI", "HbA1c", "FastingGlucose"]
@@ -14,6 +15,8 @@ UNIT_ISSUE = ("The supplied dataset has HbA1c values 30–50 and fasting glucose
 
 
 def metadata():
+    if hosted_model.configured():
+        return hosted_model.metadata()
     report = json.loads((ROOT / "maternal_model_results.json").read_text())
     digest = hashlib.sha256((ROOT / "proposed_lstm.pt").read_bytes()).hexdigest()
     return {"version": "proposed-lstm-" + digest[:12], "sha256": digest,
@@ -52,6 +55,8 @@ def load():
 
 
 def predict(values):
+    if hosted_model.configured():
+        return hosted_model.predict(values)
     # A successful state-dict load is insufficient evidence of valid clinical units.
     # Release this guard only alongside verified source-unit preprocessing and tests.
     raise RuntimeError(UNIT_ISSUE)

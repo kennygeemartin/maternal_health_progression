@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Literal
+import time
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -15,8 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .database import (initialize_database, SessionLocal, User, LoginSession, Pregnancy,
-                       Observation, Prediction, Guidance, GuidanceDelivery, Notification, ModelRegistry, AuditEvent, now)
+                       Observation, Prediction, Guidance, GuidanceDelivery, Notification, ModelRegistry, AuditEvent,
+                       PregnancyPreferences, GuidanceMonth, EmailVerification, EmailJob, now)
 from . import inference
+from . import hosted_model, guidance_service, mail, monthly_catalog
 
 SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 if os.getenv("APP_ENV") == "production" and not SECURE:
@@ -26,6 +29,7 @@ if os.getenv("APP_ENV") == "production" and not SECURE:
 async def lifespan(app):
     initialize_database()
     with SessionLocal() as db:
+        monthly_catalog.seed(db)
         meta = inference.metadata()
         entry = db.get(ModelRegistry, meta["version"])
         if not entry:
@@ -158,11 +162,12 @@ def logout(request: Request, response: Response, db: DB, user: AUTH):
 
 @app.get("/api/me")
 def me(user: AUTH):
-    return {"id": user.id, "name": user.name, "role": user.role}
+    return {"id": user.id, "name": user.name, "role": user.role, "email": user.email}
 
 class PregnancyInput(Strict):
     lmp: date
     label: str = Field(default="My pregnancy", min_length=1, max_length=100)
+    month: int | None = Field(default=None, ge=1, le=9)
 
     @model_validator(mode="after")
     def dates(self):
@@ -176,12 +181,146 @@ def pregnancies(db: DB, user: AUTH):
 
 @app.post("/api/pregnancies", status_code=201)
 def create_pregnancy(data: PregnancyInput, db: DB, user: AUTH):
-    p = Pregnancy(user_id=user.id, **data.model_dump())
+    p = Pregnancy(user_id=user.id, **data.model_dump(exclude={"month"}))
     db.add(p)
     db.flush()
+    if data.month is not None:
+        db.add(PregnancyPreferences(pregnancy_id=p.id, month=data.month))
     audit(db, user, "pregnancy.create", p.id)
     db.commit()
     return pregnancy_json(p)
+
+class PreferenceInput(Strict):
+    month: int = Field(ge=1, le=9)
+    email_enabled: bool = False
+    remote_assessment_enabled: bool = False
+
+def queue_monthly(db, user, pregnancy):
+    preference = db.get(PregnancyPreferences, pregnancy.id)
+    if not preference or not preference.email_enabled:
+        return None, "disabled"
+    if not mail.verified(db, user.id):
+        return None, "verification_required"
+    latest = db.scalar(select(Observation).where(Observation.pregnancy_id == pregnancy.id).order_by(Observation.observed_at.desc(), Observation.id.desc()).limit(1))
+    prediction = db.scalar(select(Prediction).where(Prediction.observation_id == latest.id)) if latest else None
+    entries = guidance_service.content(db, preference.month, prediction.result["category"] if prediction else "all")
+    if not entries:
+        return None, "no_reviewed_guidance"
+    subject, body, identity = guidance_service.email_content(preference.month, entries)
+    return mail.queue(db, user, pregnancy.id, "monthly_guidance", subject, body, identity), "queued"
+
+def verification_message(db, user, pregnancy):
+    if not mail.configured() or not mail.public_url():
+        return {"status": "not_configured", "message": "Email delivery needs a sender and public app URL to be configured."}
+    verification = db.get(EmailVerification, user.id)
+    if verification and verification.verified_at:
+        return {"status": "verified"}
+    if verification and verification.requested_at and verification.requested_at.replace(tzinfo=timezone.utc) > now() - timedelta(minutes=15):
+        previous = db.scalar(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.kind == "verification").order_by(EmailJob.id.desc()).limit(1))
+        if previous:
+            return mail.dispatch(db, previous)
+    token = secrets.token_urlsafe(32)
+    if not verification:
+        verification = EmailVerification(user_id=user.id)
+        db.add(verification)
+    verification.token_hash = hashlib.sha256(token.encode()).hexdigest()
+    verification.expires_at, verification.requested_at = now() + timedelta(hours=24), now()
+    link = mail.public_url() + "/?email_token=" + token
+    job = mail.queue(db, user, pregnancy.id, "verification", "Verify your Bloom email address",
+                    "Confirm that this is your email address to receive the updates you selected in Bloom.\n\n" + link +
+                    "\n\nThis link expires in 24 hours. If you did not request it, you can ignore this email.", verification.token_hash)
+    db.commit()
+    return mail.dispatch(db, job)
+
+@app.put("/api/pregnancies/{pid}/preferences")
+def preferences(pid: int, data: PreferenceInput, db: DB, user: AUTH):
+    pregnancy = owned(db, user, pid)
+    preference = db.get(PregnancyPreferences, pid)
+    if preference and (preference.month != data.month or not data.email_enabled):
+        for queued in db.scalars(select(EmailJob).where(EmailJob.pregnancy_id == pid, EmailJob.kind == "monthly_guidance", EmailJob.status.in_(["pending", "failed"]))):
+            queued.status = "cancelled"
+    if not preference:
+        preference = PregnancyPreferences(pregnancy_id=pid, **data.model_dump())
+        db.add(preference)
+    else:
+        for key, value in data.model_dump().items():
+            setattr(preference, key, value)
+    audit(db, user, "pregnancy.preferences", pid)
+    db.commit()
+    if data.email_enabled:
+        if not mail.verified(db, user.id):
+            email = verification_message(db, user, pregnancy)
+        else:
+            job, status = queue_monthly(db, user, pregnancy)
+            db.commit()
+            email = mail.dispatch(db, job) if job else {"status": status}
+    else:
+        email = {"status": "disabled"}
+    return {"saved": True, "email": email}
+
+class VerificationInput(Strict):
+    token: str = Field(min_length=32, max_length=100)
+
+@app.post("/api/email/verify")
+def verify_email(data: VerificationInput, db: DB):
+    digest = hashlib.sha256(data.token.encode()).hexdigest()
+    verification = db.scalar(select(EmailVerification).where(EmailVerification.token_hash == digest).with_for_update())
+    if not verification or not verification.expires_at or verification.expires_at.replace(tzinfo=timezone.utc) < now():
+        raise HTTPException(400, "The email verification link is invalid or expired. Request a new email from your pregnancy preferences.")
+    verification.verified_at, verification.token_hash = now(), None
+    user = db.get(User, verification.user_id)
+    audit(db, user, "email.verified", user.id)
+    jobs = []
+    for pregnancy in db.scalars(select(Pregnancy).where(Pregnancy.user_id == user.id)):
+        job, _ = queue_monthly(db, user, pregnancy)
+        if job:
+            jobs.append(job)
+    db.commit()
+    # Remaining jobs are picked up by the authenticated daily worker.
+    for job in jobs[:2]:
+        mail.dispatch(db, job)
+    return {"verified": True, "message": "Email verified. Your selected guidance is queued for delivery."}
+
+@app.post("/api/pregnancies/{pid}/email-guidance")
+def email_guidance(pid: int, db: DB, user: AUTH):
+    pregnancy = owned(db, user, pid)
+    preference = db.get(PregnancyPreferences, pid)
+    if not preference or not preference.email_enabled:
+        raise HTTPException(409, "Enable guidance emails in pregnancy preferences first.")
+    if not mail.verified(db, user.id):
+        return verification_message(db, user, pregnancy)
+    job, status = queue_monthly(db, user, pregnancy)
+    db.commit()
+    return mail.dispatch(db, job) if job else {"status": status}
+
+@app.post("/api/emails/{jid}/retry")
+def retry_email(jid: int, db: DB, user: AUTH):
+    job = db.get(EmailJob, jid)
+    if not job or job.user_id != user.id:
+        raise HTTPException(404, "Email not found")
+    return mail.dispatch(db, job)
+
+@app.get("/api/jobs/emails")
+def email_worker(request: Request, db: DB):
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not hmac.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
+        raise HTTPException(401, "Worker authorization required")
+    if not mail.configured():
+        return {"status": "email_not_configured", "processed": 0}
+    started = time.monotonic()
+    for preference in db.scalars(select(PregnancyPreferences).where(PregnancyPreferences.email_enabled == True).order_by(PregnancyPreferences.last_checked_at.asc().nullsfirst()).limit(25)):
+        pregnancy = db.get(Pregnancy, preference.pregnancy_id)
+        user = db.get(User, pregnancy.user_id)
+        queue_monthly(db, user, pregnancy)
+        preference.last_checked_at = now()
+    db.commit()
+    jobs = list(db.scalars(select(EmailJob).where(EmailJob.status.in_(["pending", "failed", "sending"]), EmailJob.attempts < 5).order_by(EmailJob.id).limit(2)))
+    processed = []
+    for job in jobs:
+        if time.monotonic() - started > 30:
+            break
+        processed.append(mail.dispatch(db, job))
+    return {"processed": len(processed), "statuses": [item["status"] for item in processed]}
 
 class Measurements(Strict):
     Age: float = Field(ge=10, le=60)
@@ -189,8 +328,8 @@ class Measurements(Strict):
     HeartRate: float = Field(ge=30, le=220)
     SystolicBP: float = Field(ge=60, le=260)
     DiastolicBP: float = Field(ge=30, le=160)
-    BMI: float = Field(ge=10, le=70)
-    HbA1c: float = Field(ge=2, le=20)
+    BMI: float | None = Field(default=None, ge=10, le=70)
+    HbA1c: float | None = Field(default=None, ge=2, le=20)
     FastingGlucose: float = Field(ge=20, le=600)
 
     @model_validator(mode="after")
@@ -212,8 +351,9 @@ class ObservationInput(Strict):
             raise ValueError("Observation timestamp must include a timezone")
         if self.observed_at > now() + timedelta(minutes=5):
             raise ValueError("Observation cannot be in the future")
-        if self.units != UNITS:
-            raise ValueError("All eight measurements require the specified units")
+        expected = {key: UNITS[key] for key in self.values.model_dump(exclude_none=True)}
+        if self.units != expected:
+            raise ValueError("Each recorded measurement requires its specified unit")
         return self
 
 @app.post("/api/pregnancies/{pid}/observations", status_code=201)
@@ -222,7 +362,7 @@ def record(pid: int, data: ObservationInput, db: DB, user: AUTH):
     if data.observed_at.date() < p.lmp:
         raise HTTPException(422, "Observation predates this pregnancy")
     observation = Observation(pregnancy_id=pid, observed_at=data.observed_at.astimezone(timezone.utc),
-                              values=data.values.model_dump(), units=data.units)
+                              values=data.values.model_dump(exclude_none=True), units=data.units)
     db.add(observation)
     db.flush()
     audit(db, user, "observation.create", observation.id)
@@ -238,10 +378,15 @@ def predict(oid: int, db: DB, user: AUTH):
     existing = db.scalar(select(Prediction).where(Prediction.observation_id == oid))
     if existing:
         return existing.result
+    preference = db.get(PregnancyPreferences, observation.pregnancy_id)
+    if hosted_model.configured() and (not preference or not preference.remote_assessment_enabled):
+        raise HTTPException(409, "Enable external research assessments in your pregnancy preferences before sending measurements to the hosted model.")
     try:
         result = inference.predict(observation.values)
+    except hosted_model.ModelUnavailable as error:
+        raise HTTPException(503, str(error))
     except Exception:
-        raise HTTPException(503, inference.UNIT_ISSUE)
+        raise HTTPException(503, "Assessment unavailable. " + ("Your measurements remain saved." if hosted_model.configured() else inference.UNIT_ISSUE))
     meta = inference.metadata()
     prediction = Prediction(pregnancy_id=observation.pregnancy_id, observation_id=oid,
                             model_version=meta["version"], result={**result, "model_version": meta["version"]})
@@ -256,6 +401,13 @@ def predict(oid: int, db: DB, user: AUTH):
                             message="An elevated research risk estimate was recorded. Contact your maternity care team to review these measurements. This estimate is not a diagnosis."))
     audit(db, user, "prediction.create", prediction.id)
     db.commit()
+    if result["category"] in {"mid", "high"} and preference and preference.email_enabled and mail.verified(db, user.id):
+        job = mail.queue(db, user, observation.pregnancy_id, "risk_alert", "Bloom: please review your assessment",
+            "An elevated research risk estimate was recorded. Contact your maternity care team to review your measurements. "
+            "Sign in to Bloom for details. This estimate is not a diagnosis. You can turn off emails in your pregnancy preferences.",
+            f"prediction:{prediction.id}")
+        db.commit()
+        mail.dispatch(db, job)
     return prediction.result
 
 @app.get("/api/pregnancies/{pid}/dashboard")
@@ -263,15 +415,20 @@ def dashboard(pid: int, db: DB, user: AUTH):
     p = owned(db, user, pid)
     observations = list(db.scalars(select(Observation).where(Observation.pregnancy_id == pid).order_by(Observation.observed_at, Observation.id)))
     predictions = {x.observation_id: x for x in db.scalars(select(Prediction).where(Prediction.pregnancy_id == pid))}
-    stage = pregnancy_json(p)["stage"]
     latest = predictions.get(observations[-1].id) if observations else None
     category = latest.result["category"] if latest else "all"
-    guidance = db.scalars(select(Guidance).where(Guidance.reviewed == True, Guidance.stage == stage,
-                                                Guidance.category.in_(["all", category])))
+    month = guidance_service.selected_month(db, p)
+    guidance = guidance_service.content(db, month, category)
+    preference = db.get(PregnancyPreferences, pid)
     return {"pregnancy": pregnancy_json(p), "observations": [
         {"id": o.id, "observed_at": o.observed_at.replace(tzinfo=timezone.utc), "values": o.values,
          "prediction": predictions[o.id].result if o.id in predictions else None} for o in observations],
-        "guidance": [{"id": g.id, "title": g.title, "body": g.body, "source_url": g.source_url} for g in guidance],
+        "guidance": guidance,
+        "preferences": {"month": month, "email_enabled": bool(preference and preference.email_enabled),
+                        "email_verified": mail.verified(db, user.id), "email_configured": mail.configured(),
+                        "email_address": user.email, "remote_assessment_enabled": bool(preference and preference.remote_assessment_enabled),
+                        "remote_model": hosted_model.metadata() if hosted_model.configured() else None},
+        "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
         "notifications": [{"id": n.id, "message": n.message, "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
 
@@ -289,7 +446,8 @@ def read_notification(nid: int, db: DB, user: AUTH):
 def guidance_delivery(pid: int, gid: int, db: DB, user: AUTH):
     p = owned(db, user, pid)
     g = db.get(Guidance, gid)
-    if not g or not g.reviewed or g.stage != pregnancy_json(p)["stage"]:
+    available = {entry["id"] for entry in guidance_service.content(db, guidance_service.selected_month(db, p), g.category if g else "all")}
+    if not g or gid not in available:
         raise HTTPException(404, "Reviewed guidance not found for this stage")
     delivery = db.scalar(select(GuidanceDelivery).where(GuidanceDelivery.pregnancy_id == pid, GuidanceDelivery.guidance_id == gid))
     if not delivery:
@@ -311,12 +469,18 @@ class GuidanceInput(Strict):
     stage: int = Field(ge=1, le=3)
     category: Literal["all", "low", "mid", "high"]
     source_url: str = Field(max_length=500, pattern=r"^https://")
+    month: int | None = Field(default=None, ge=1, le=9)
 
 @app.post("/api/admin/guidance", status_code=201)
 def add_guidance(data: GuidanceInput, db: DB, user: ADMIN):
-    g = Guidance(**data.model_dump())
+    values = data.model_dump(exclude={"month"})
+    if data.month:
+        values["stage"] = (data.month - 1) // 3 + 1
+    g = Guidance(**values)
     db.add(g)
     db.flush()
+    if data.month:
+        db.add(GuidanceMonth(guidance_id=g.id, month=data.month))
     audit(db, user, "guidance.draft", g.id)
     db.commit()
     return {"id": g.id}
@@ -334,6 +498,7 @@ def review_guidance(gid: int, db: DB, user: ADMIN):
 @app.get("/api/admin")
 def administration(db: DB, user: ADMIN):
     return {"guidance": [{"id": g.id, "title": g.title, "stage": g.stage, "category": g.category,
+                          "month": db.get(GuidanceMonth, g.id).month if db.get(GuidanceMonth, g.id) else None,
                           "reviewed": g.reviewed, "body": g.body, "source_url": g.source_url} for g in db.scalars(select(Guidance))],
             "models": [m.metadata_json for m in db.scalars(select(ModelRegistry))],
             "audit": [{"action": a.action, "resource": a.resource, "user_id": a.user_id, "created_at": a.created_at}

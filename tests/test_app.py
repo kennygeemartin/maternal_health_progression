@@ -2,6 +2,7 @@ import os
 from datetime import date, timedelta, datetime, timezone
 os.environ['DATABASE_URL'] = 'sqlite://'
 os.environ['APP_ENV'] = 'test'
+os.environ['RISK_MODEL_PROVIDER'] = 'disabled'
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database import SessionLocal, User
@@ -28,7 +29,7 @@ def test_complete_workflow_and_isolation(monkeypatch):
         assert client.post(f'/api/pregnancies/{pid}/observations', headers=HEADERS, json=bad).status_code == 422
         bad = {**payload, 'units': {**UNITS, 'BodyTempF': 'degC'}}
         assert client.post(f'/api/pregnancies/{pid}/observations', headers=HEADERS, json=bad).status_code == 422
-        bad = {**payload, 'values': {k:v for k,v in VALUES.items() if k!='BMI'}}
+        bad = {**payload, 'values': {k:v for k,v in VALUES.items() if k!='Age'}}
         assert client.post(f'/api/pregnancies/{pid}/observations', headers=HEADERS, json=bad).status_code == 422
         bad = {**payload, 'observed_at': (datetime.now(timezone.utc)+timedelta(days=1)).isoformat()}
         assert client.post(f'/api/pregnancies/{pid}/observations', headers=HEADERS, json=bad).status_code == 422
@@ -72,9 +73,9 @@ def test_chronology_content_review_and_notifications(monkeypatch):
         nid=dash['notifications'][0]['id']
         assert client.patch(f'/api/notifications/{nid}/read',headers=HEADERS).status_code==200
         g=client.post('/api/admin/guidance',headers=HEADERS,json={'title':'Test reviewed content','body':'Test body','stage':2,'category':'high','source_url':'https://example.com'}).json()
-        assert client.get(f'/api/pregnancies/{pid}/dashboard').json()['guidance']==[]
+        assert g['id'] not in [x['id'] for x in client.get(f'/api/pregnancies/{pid}/dashboard').json()['guidance']]
         assert client.post(f'/api/admin/guidance/{g["id"]}/review',headers=HEADERS).status_code==200
-        assert len(client.get(f'/api/pregnancies/{pid}/dashboard').json()['guidance'])==1
+        assert g['id'] in [x['id'] for x in client.get(f'/api/pregnancies/{pid}/dashboard').json()['guidance']]
         assert client.post(f'/api/pregnancies/{pid}/guidance/{g["id"]}/delivered',headers=HEADERS).status_code==200
         assert client.post(f'/api/pregnancies/{pid}/guidance/{g["id"]}/delivered',headers=HEADERS).status_code==200
         assert client.get('/api/admin').json()['audit']

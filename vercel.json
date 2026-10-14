@@ -6,5 +6,11 @@
       "maxDuration": 60,
       "includeFiles": "{frontend/**,Results/proposed_lstm.pt,Results/maternal_model_scaler.pkl,Results/maternal_model_results.json}"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/jobs/emails",
+      "schedule": "0 7 * * *"
+    }
+  ]
 }
