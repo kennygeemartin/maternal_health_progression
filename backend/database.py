@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, ForeignKey, String, Date, DateTime, JSON, Boolean, UniqueConstraint
+from sqlalchemy import create_engine, ForeignKey, String, Date, DateTime, JSON, Boolean, UniqueConstraint, MetaData, text
+from sqlalchemy.schema import CreateSchema
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -18,12 +19,22 @@ if os.getenv("VERCEL") and not URL.startswith("postgresql"):
 if ENV == "production" and not URL.startswith("postgresql"):
     raise RuntimeError("Production requires PostgreSQL")
 engine = create_engine(URL, connect_args={"check_same_thread": False} if URL.startswith("sqlite") else {},
-                       pool_pre_ping=True,
+                       pool_pre_ping=True, hide_parameters=True,
                        **({"poolclass": StaticPool} if URL in {"sqlite://", "sqlite:///:memory:"} else {}))
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
+SCHEMA = "bloom" if engine.dialect.name == "postgresql" else None
 
 class Base(DeclarativeBase):
-    pass
+    metadata = MetaData(schema=SCHEMA)
+
+def initialize_database():
+    """Keep Bloom separate from unrelated public tables; never alter or drop them."""
+    with engine.begin() as connection:
+        if SCHEMA:
+            # Serialize schema/table creation across simultaneous serverless cold starts.
+            connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 0x424C4F4F4D})
+            connection.execute(CreateSchema(SCHEMA, if_not_exists=True))
+        Base.metadata.create_all(connection)
 
 class User(Base):
     __tablename__ = "users"

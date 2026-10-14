@@ -46,7 +46,11 @@ The report gives 76.0% held-out accuracy for this LSTM. This research prototype 
 
 Tests cover real artifact inference, probability parity, record validation, account isolation, chronological history, content review gating, notifications and admin permissions. Tests use an isolated in-memory SQLite database. PostgreSQL should additionally be exercised in the target deployment environment.
 
+GitHub CI also runs `tests/test_postgres.py` against a disposable `bloom_ci` PostgreSQL service. It checks registration and login with an incompatible pre-existing `public.users` table and verifies that its original contents are preserved. The PostgreSQL test is skipped locally unless `POSTGRES_TEST_URL` is provided for that disposable database.
+
 ## Deployment
+
+PostgreSQL deployments use a dedicated `bloom` schema, created automatically on startup. Existing tables in `public` are preserved and are not used by Bloom. This prevents collisions with older applications' `users` tables. The connected role needs permission to create the schema and its tables. Existing data is not automatically migrated between schemas. Local SQLite development continues to use its usual table layout. SQL error logging hides bound parameter values.
 
 ### Vercel
 

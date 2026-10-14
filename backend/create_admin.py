@@ -1,11 +1,11 @@
 """Local operator command; public registration never grants administrator privileges."""
 from getpass import getpass
 from sqlalchemy import select
-from .database import Base, engine, SessionLocal, User
+from .database import initialize_database, SessionLocal, User
 from .main import password_hash
 
 if __name__ == "__main__":
-    Base.metadata.create_all(engine)
+    initialize_database()
     email = input("Administrator email: ").strip().lower()
     name = input("Name: ").strip()
     password = getpass("Password (at least 10 characters): ")

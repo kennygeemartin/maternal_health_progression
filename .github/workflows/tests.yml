@@ -3,6 +3,22 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.8
+        env:
+          POSTGRES_USER: bloom_test
+          POSTGRES_PASSWORD: disposable-ci-password
+          POSTGRES_DB: bloom_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bloom_test -d bloom_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_TEST_URL: postgresql+psycopg://bloom_test:disposable-ci-password@localhost:5432/bloom_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -10,4 +26,4 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m pytest tests/test_app.py -q
+      - run: python -m pytest tests/test_app.py tests/test_postgres.py -q

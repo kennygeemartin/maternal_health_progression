@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import (Base, engine, SessionLocal, User, LoginSession, Pregnancy,
+from .database import (initialize_database, SessionLocal, User, LoginSession, Pregnancy,
                        Observation, Prediction, Guidance, GuidanceDelivery, Notification, ModelRegistry, AuditEvent, now)
 from . import inference
 
@@ -24,7 +24,7 @@ if os.getenv("APP_ENV") == "production" and not SECURE:
 
 @asynccontextmanager
 async def lifespan(app):
-    Base.metadata.create_all(engine)
+    initialize_database()
     with SessionLocal() as db:
         meta = inference.metadata()
         entry = db.get(ModelRegistry, meta["version"])
@@ -32,7 +32,16 @@ async def lifespan(app):
             db.add(ModelRegistry(version=meta["version"], metadata_json=meta))
         else:
             entry.metadata_json = meta
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Another cold start can register the same model after our existence check.
+            db.rollback()
+            entry = db.get(ModelRegistry, meta["version"])
+            if entry is None:
+                raise
+            entry.metadata_json = meta
+            db.commit()
     yield
 
 app = FastAPI(title="Bloom Maternal Health", version="1.0.0", lifespan=lifespan)
