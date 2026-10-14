@@ -102,3 +102,7 @@ The default `RISK_MODEL_PROVIDER=bundled` runs the pinned [MIT-licensed pretrain
 Inference needs actual age, blood pressure, glucose, temperature and heart rate. It derives only the documented Celsius-to-Fahrenheit and mg/dL-to-mmol/L unit conversions. Optional BMI and HbA1c do not affect this classifier. Missing values are rejected rather than fabricated. The clean source dataset does not cover many normal fasting glucose readings. The app retains and evaluates valid readings outside its reference envelope, flags unreliable research scores, shows Review needed and queues a review notice; it does not claim those scores prove clinical safety. The field `outside_training_range` retains its API name but now refers to the documented cleaned source dataset envelope rather than proven per-fold training bounds.
 
 The engine's outputs match native CatBoost to 1e-13 on 1,219 entirely synthetic cases, including random values and both sides of learned split boundaries. Fixtures require no scientific packages or external service at runtime. This verifies faithful model conversion, not medical validity. See [model provenance and limitations](docs/hosted-model-review.md).
+
+## Shared visual identity
+
+A full-width maternal-care picture header appears on login, registration and every application view. Healthcare blue and warm rose accents replace the earlier green palette; locally hosted Manrope and Source Sans 3 improve readability. See [interface design, asset prompt and contrast checks](docs/interface-design.md).

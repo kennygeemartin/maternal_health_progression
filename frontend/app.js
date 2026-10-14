@@ -146,8 +146,8 @@ function renderTrend(obs) {
   const min=Math.floor((Math.min(...values)-10)/10)*10, max=Math.ceil((Math.max(...values)+10)/10)*10;
   const x=i=>45+(points.length===1?210:i/(points.length-1)*420), y=v=>140-(v-min)/(max-min)*115;
   let svg='<svg viewBox="0 0 500 175" role="img" aria-label="Blood pressure over recent visits">';
-  for(let i=0;i<4;i++){const val=min+(max-min)*i/3;svg+=`<line x1="40" y1="${y(val)}" x2="480" y2="${y(val)}" stroke="#edf0e8"/><text x="5" y="${y(val)+4}">${Math.round(val)}</text>`;}
-  for(const [key,color] of [['SystolicBP','#24594e'],['DiastolicBP','#b2b96d']]){
+  for(let i=0;i<4;i++){const val=min+(max-min)*i/3;svg+=`<line x1="40" y1="${y(val)}" x2="480" y2="${y(val)}" stroke="#dce4ec"/><text x="5" y="${y(val)+4}">${Math.round(val)}</text>`;}
+  for(const [key,color] of [['SystolicBP','#174c70'],['DiastolicBP','#9f4960']]){
     svg+=`<polyline points="${points.map((o,i)=>`${x(i)},${y(o.values[key])}`).join(' ')}" fill="none" stroke="${color}" stroke-width="2"/>`;
     svg+=points.map((o,i)=>`<circle cx="${x(i)}" cy="${y(o.values[key])}" r="4" fill="${color}"><title>${dateText(o.observed_at)}: ${o.values[key]} mmHg</title></circle>`).join('');
   }

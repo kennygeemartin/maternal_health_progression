@@ -1,6 +1,6 @@
-# Dashboard picture banner
+# Original dashboard picture banner (superseded)
 
-Asset: `frontend/assets/maternal-care-banner.jpg`, 2156 x 729 pixels. Generated using the built-in image generation tool on 2026-10-14 and saved as a lightweight JPEG for the app. The portrayed person is fictional. The original PNG remains in the image generator output directory. The banner appears on the overview dashboard; mobile displays the photograph above the caption. Alternative text describes the photograph. The service worker caches this static asset only, alongside the existing application shell.
+Asset: `frontend/assets/maternal-care-banner.jpg`, 2156 x 729 pixels. Generated using the built-in image generation tool on 2026-10-14 and saved as a lightweight JPEG for the app. The portrayed person is fictional. The original PNG remains in the image generator output directory. This first version has been replaced by the shared site header in `docs/interface-design.md`. It originally appeared on the overview dashboard; mobile displays the photograph above the caption. Alternative text describes the photograph. The service worker caches this static asset only, alongside the existing application shell.
 
 ## Final generation prompt
 
