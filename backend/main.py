@@ -389,7 +389,7 @@ def predict(oid: int, db: DB, user: AUTH):
     except hosted_model.ModelUnavailable as error:
         raise HTTPException(503, str(error))
     except Exception:
-        raise HTTPException(503, "Assessment unavailable. " + ("Your measurements remain saved." if hosted_model.configured() else inference.UNIT_ISSUE))
+        raise HTTPException(503, "Assessment unavailable. " + (inference.UNIT_ISSUE if hosted_model.provider() == "disabled" else "Your measurements remain saved."))
     meta = inference.metadata()
     prediction = Prediction(pregnancy_id=observation.pregnancy_id, observation_id=oid,
                             model_version=meta["version"], result={**result, "model_version": meta["version"]})
@@ -399,14 +399,16 @@ def predict(oid: int, db: DB, user: AUTH):
     except IntegrityError:
         db.rollback()
         return db.scalar(select(Prediction).where(Prediction.observation_id == oid)).result
-    if result["category"] in {"mid", "high"}:
+    needs_review = result["category"] in {"mid", "high"} or result.get("review_required", False)
+    message = result.get("review_message") or "An elevated research risk estimate was recorded. Contact your maternity care team to review these measurements. This estimate is not a diagnosis."
+    if needs_review:
         db.add(Notification(user_id=user.id, pregnancy_id=observation.pregnancy_id, prediction_id=prediction.id,
-                            message="An elevated research risk estimate was recorded. Contact your maternity care team to review these measurements. This estimate is not a diagnosis."))
+                            message=message))
     audit(db, user, "prediction.create", prediction.id)
     db.commit()
-    if result["category"] in {"mid", "high"} and preference and preference.email_enabled and mail.verified(db, user.id):
+    if needs_review and preference and preference.email_enabled and mail.verified(db, user.id):
         job = mail.queue(db, user, observation.pregnancy_id, "risk_alert", "Bloom: please review your assessment",
-            "An elevated research risk estimate was recorded. Contact your maternity care team to review your measurements. "
+            message + " " +
             "Sign in to Bloom for details. This estimate is not a diagnosis. You can turn off emails in your pregnancy preferences.",
             f"prediction:{prediction.id}")
         db.commit()
@@ -430,7 +432,8 @@ def dashboard(pid: int, db: DB, user: AUTH):
         "preferences": {"month": month, "email_enabled": bool(preference and preference.email_enabled),
                         "email_verified": mail.verified(db, user.id), "email_configured": mail.configured(),
                         "email_address": user.email, "remote_assessment_enabled": bool(preference and preference.remote_assessment_enabled),
-                        "remote_model": hosted_model.metadata() if hosted_model.configured() else None},
+                        "remote_model": hosted_model.metadata() if hosted_model.configured() else None,
+                        "assessment_model": inference.metadata()},
         "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
         "notifications": [{"id": n.id, "message": n.message, "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}

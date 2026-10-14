@@ -1,8 +1,8 @@
 # Bloom · Maternal health support
 
-Responsive maternal health support application with FastAPI, PostgreSQL and a mobile-friendly web interface. Users can choose pregnancy month 1-9, view published monthly guidance, opt into email guidance using their registration address, and enable an external pretrained research assessment. In-app elevated-risk notices remain available.
+Responsive maternal health support application with FastAPI, PostgreSQL and a mobile-friendly web interface. Users can choose pregnancy month 1-9, view published monthly guidance, opt into email guidance using their registration address, and run a bundled pretrained research assessment without a model API key, token or external request. In-app elevated-risk notices remain available.
 
-Resend integration is implemented, but live email requires privately configured credentials and a verified sender. The public model is a research service with restricted input ranges and usage quotas; it is not a clinically validated assessment or a longitudinal LSTM replacement. See [hosted model review](docs/hosted-model-review.md).
+Resend integration is implemented, but live email requires privately configured credentials and a verified sender. The default pretrained CatBoost model runs inside the application. Its inference has no model-service fee or token requirement; hosting and email providers still have their own limits. It is a research classifier, not a clinically validated assessment or a longitudinal LSTM replacement. See [hosted model review](docs/hosted-model-review.md).
 
 ## Run locally
 
@@ -28,20 +28,20 @@ Alternatively set `POSTGRES_PASSWORD` and run `docker compose up --build`. Creat
 
 The same interface adapts to phones and tablets. For phone testing, open `http://YOUR_COMPUTER_LAN_IP:8000` on the same network and permit the port in your firewall. HTTPS hosting enables the service worker and home-screen installation where supported. A manifest and shell-only service worker are included. Health records are not cached or stored in browser local storage, and saving requires a network connection. Mobile support is a responsive web app, not a separate native Android/iOS application. In-app notices and opt-in Resend email delivery are implemented; native push and SMS are not implemented.
 
-## Original local model compatibility
+## Original LSTM compatibility (disabled)
 
 Artifacts stay in `Results/`. The supplied `proposed_lstm.pt` has a single LSTM layer with input size 1, hidden size 50, dropout 0.20 and three output classes. The saved scaler identifies scikit-learn **1.9.0**; the training report identifies PyTorch **2.14.1**. Requirements preserve those versions. If your package mirror does not offer them, obtain the original training environment rather than silently loading the pickle with an incompatible scikit-learn version.
 
-Feature order: Age (years), BodyTempF (°F), HeartRate (bpm), SystolicBP (mmHg), DiastolicBP (mmHg), BMI (kg/m²), HbA1c (%), FastingGlucose (mg/dL). The hosted model requires six measurements from one visit; BMI and HbA1c are optional records and are not transmitted. The original local artifact expects all eight. Invalid units, missing/nonfinite values, implausible ranges, future timestamps and systolic pressure at or below diastolic pressure are rejected. Bounds are input plausibility checks, not clinical referral thresholds. Out-of-training-range values are flagged without clipping or refitting.
+Feature order: Age (years), BodyTempF (°F), HeartRate (bpm), SystolicBP (mmHg), DiastolicBP (mmHg), BMI (kg/m²), HbA1c (%), FastingGlucose (mg/dL). The bundled pretrained model requires six measurements from one visit; BMI and HbA1c are optional records and are not transmitted. The original local artifact expects all eight. Invalid units, missing/nonfinite values, implausible ranges, future timestamps and systolic pressure at or below diastolic pressure are rejected. Bounds are input plausibility checks, not clinical referral thresholds. Out-of-training-range values are flagged without clipping or refitting.
 
-The training code serializes eight **static features as synthetic timesteps** into `[batch, 8, 1]`. Compatibility tests preserve that behavior; live assessments use the external six-input service instead. It does not reinterpret visits as model timesteps, invent missing-value masks, or claim longitudinal prediction. True temporal prediction requires a separately trained and validated longitudinal model. Categories use argmax because clinical probability thresholds were not supplied. Registry entries record both artifact hashes, schema, decision rule and research status. Predictions retain their model version and source observation.
+The training code serializes eight **static features as synthetic timesteps** into `[batch, 8, 1]`. Compatibility tests preserve that behavior; live assessments use the bundled six-input pretrained model instead. It does not reinterpret visits as model timesteps, invent missing-value masks, or claim longitudinal prediction. True temporal prediction requires a separately trained and validated longitudinal model. Categories use argmax because clinical probability thresholds were not supplied. Registry entries record both artifact hashes, schema, decision rule and research status. Predictions retain their model version and source observation.
 
 The report gives 76.0% held-out accuracy for this LSTM. This research prototype is not a clinically validated diagnostic device. Clinically reviewed content, referral rules, prospective validation and operating procedures must be supplied before patient-facing deployment.
 
 ## Verification
 
 ```powershell
-.venv\Scripts\python -m pytest tests/test_app.py tests/test_updates.py tests/test_postgres.py -q
+.venv\Scripts\python -m pytest tests/test_app.py tests/test_updates.py tests/test_bundled_model.py tests/test_postgres.py -q
 ```
 
 Tests cover real artifact inference, probability parity, record validation, account isolation, chronological history, content review gating, notifications and admin permissions. Tests use an isolated in-memory SQLite database. PostgreSQL should additionally be exercised in the target deployment environment.
@@ -57,8 +57,8 @@ PostgreSQL deployments use a dedicated `bloom` schema, created automatically on 
 1. Import the GitHub repository into Vercel with the project root set to the repository root. `pyproject.toml` selects `backend.main:app` explicitly; do not select the separate `app/` implementation.
 2. Connect a PostgreSQL database through Vercel Marketplace (for example Neon). The app accepts `DATABASE_URL` or `POSTGRES_URL` (with `DATABASE_URL` taking priority). Keep required SSL query parameters. Both `postgres://` and `postgresql://` are normalized to the installed psycopg driver.
 3. Set `APP_ENV=production` and `COOKIE_SECURE=true` for deployed environments. Use a separate PostgreSQL database for preview environments. SQLite is deliberately rejected on Vercel because function storage is not persistent.
-4. The lightweight Vercel runtime does not load PyTorch or download external executable model artifacts. External assessment runs at the provider.
-5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. Research assessment requires per-pregnancy consent in Pregnancy settings; unsupported measurements and provider failures remain saved without a prediction. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
+4. The lightweight Vercel runtime does not load PyTorch or download external executable model artifacts. The default numerical model runs with the Python standard library; its JSON weights are bundled explicitly. Optional external assessment runs at the configured provider.
+5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. The default bundled assessment requires no external-model consent or model token. Reference-range warnings produce a Review needed notice; no measurement is adjusted to fit a model. Optional external providers still require per-pregnancy consent. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
 
 The configuration preserves the same-origin frontend/API and FastAPI security middleware. No database credentials or cloud access tokens are included. Vercel account access and a configured database are required to complete a live deployment.
 
@@ -93,4 +93,12 @@ Resend idempotency keys and persisted claims reduce duplicates. A delivery attem
 
 [Vercel cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs) uses `CRON_SECRET` automatically as a Bearer header. The worker rejects requests without the matching secret.
 
-Temperature entry and display use Celsius. New records retain `BodyTempC` / `degC`; the hosted adapter converts to Fahrenheit only for the provider. Existing Fahrenheit records remain readable and display in Celsius. Per-field unit labels and help notes replace unit dropdowns.
+Temperature entry and display use Celsius. New records retain `BodyTempC` / `degC`; model preprocessing converts to Fahrenheit only for inference. Existing Fahrenheit records remain readable and display in Celsius. Per-field unit labels and help notes replace unit dropdowns.
+
+## Token-free pretrained assessments
+
+The default `RISK_MODEL_PROVIDER=bundled` runs the pinned [MIT-licensed pretrained model](https://github.com/viochris/Maternal-Health-Risk-Model-Research) inside FastAPI using numeric JSON and standard Python. Model weights and the original fitted scaler are preserved; nothing is retrained at startup. There is no model API key, token, remote cold start, per-prediction service fee, or public model quota. Vercel hosting, PostgreSQL and Resend retain their own usage limits; this does not promise unlimited free infrastructure. If Vercel already has `RISK_MODEL_PROVIDER=huggingface` or `rest`, change it to `bundled` and deploy the latest main branch.
+
+Inference needs actual age, blood pressure, glucose, temperature and heart rate. It derives only the documented Celsius-to-Fahrenheit and mg/dL-to-mmol/L unit conversions. Optional BMI and HbA1c do not affect this classifier. Missing values are rejected rather than fabricated. The clean source dataset does not cover many normal fasting glucose readings. The app retains and evaluates valid readings outside its reference envelope, flags unreliable research scores, shows Review needed and queues a review notice; it does not claim those scores prove clinical safety. The field `outside_training_range` retains its API name but now refers to the documented cleaned source dataset envelope rather than proven per-fold training bounds.
+
+The engine's outputs match native CatBoost to 1e-13 on 1,219 entirely synthetic cases, including random values and both sides of learned split boundaries. Fixtures require no scientific packages or external service at runtime. This verifies faithful model conversion, not medical validity. See [model provenance and limitations](docs/hosted-model-review.md).

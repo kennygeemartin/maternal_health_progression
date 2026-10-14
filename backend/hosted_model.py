@@ -17,7 +17,7 @@ INPUT_RANGES = {"Age": (10,70), "SystolicBP": (70,160), "DiastolicBP": (49,100),
                 "BS": (6,19), "BodyTemp": (98,103), "HeartRate": (60,90)}
 
 def provider():
-    return os.getenv("RISK_MODEL_PROVIDER", "rest" if os.getenv("RISK_MODEL_URL") else "huggingface")
+    return os.getenv("RISK_MODEL_PROVIDER", "rest" if os.getenv("RISK_MODEL_URL") else "bundled")
 
 class ModelUnavailable(RuntimeError):
     pass

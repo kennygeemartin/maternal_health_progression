@@ -4,7 +4,7 @@
   "functions": {
     "backend/main.py": {
       "maxDuration": 60,
-      "includeFiles": "{frontend/**,Results/proposed_lstm.pt,Results/maternal_model_scaler.pkl,Results/maternal_model_results.json}"
+      "includeFiles": "{frontend/**,backend/models/**,Results/proposed_lstm.pt,Results/maternal_model_scaler.pkl,Results/maternal_model_results.json}"
     }
   },
   "crons": [
