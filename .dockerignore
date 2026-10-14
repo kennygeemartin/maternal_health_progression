@@ -1,0 +1,11 @@
+.venv
+.python
+.uv-cache
+.git
+*.db
+.env
+__pycache__
+.pytest_cache
+Results/*.csv
+Results/*.xlsx
+Results/*.zip

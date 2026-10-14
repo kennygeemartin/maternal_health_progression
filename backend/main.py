@@ -1,0 +1,337 @@
+import hashlib
+import hmac
+import os
+import secrets
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Annotated, Literal
+
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from .database import (Base, engine, SessionLocal, User, LoginSession, Pregnancy,
+                       Observation, Prediction, Guidance, GuidanceDelivery, Notification, ModelRegistry, AuditEvent, now)
+from . import inference
+
+SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+if os.getenv("APP_ENV") == "production" and not SECURE:
+    raise RuntimeError("Production requires COOKIE_SECURE=true and HTTPS")
+
+@asynccontextmanager
+async def lifespan(app):
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        meta = inference.metadata()
+        entry = db.get(ModelRegistry, meta["version"])
+        if not entry:
+            db.add(ModelRegistry(version=meta["version"], metadata_json=meta))
+        else:
+            entry.metadata_json = meta
+        db.commit()
+    yield
+
+app = FastAPI(title="Bloom Maternal Health", version="1.0.0", lifespan=lifespan)
+
+@app.middleware("http")
+async def headers(request, call_next):
+    # Require a custom header on mutations, including login, to prevent cross-site form attacks.
+    if request.method in {"POST", "PATCH", "DELETE", "PUT"} and request.headers.get("x-bloom-request") != "1":
+        return Response("Missing request header", status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'"
+    if request.url.path == "/docs":
+        # FastAPI's standard documentation UI uses jsDelivr assets and an inline initializer.
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: https://fastapi.tiangolo.com; object-src 'none'; frame-ancestors 'none'"
+    if request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+def get_db():
+    with SessionLocal() as db:
+        yield db
+
+DB = Annotated[Session, Depends(get_db)]
+
+def password_hash(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt.encode(), n=16384, r=8, p=1).hex()
+    return salt + ":" + digest
+
+def current_user(request: Request, db: DB):
+    token = request.cookies.get("bloom_session", "")
+    session = db.get(LoginSession, hashlib.sha256(token.encode()).hexdigest()) if token else None
+    if not session or session.expires_at.replace(tzinfo=timezone.utc) < now():
+        raise HTTPException(401, "Please sign in")
+    return db.get(User, session.user_id)
+
+AUTH = Annotated[User, Depends(current_user)]
+
+def admin(user: AUTH):
+    if user.role != "admin":
+        raise HTTPException(403, "Administrator access required")
+    return user
+
+ADMIN = Annotated[User, Depends(admin)]
+
+def audit(db, user, action, resource):
+    db.add(AuditEvent(user_id=user.id, action=action, resource=str(resource)))
+
+def owned(db, user, pregnancy_id):
+    pregnancy = db.get(Pregnancy, pregnancy_id)
+    if not pregnancy or pregnancy.user_id != user.id:
+        raise HTTPException(404, "Pregnancy not found")
+    return pregnancy
+
+def pregnancy_json(p):
+    days = (date.today() - p.lmp).days
+    week = days // 7
+    return {"id": p.id, "label": p.label, "lmp": p.lmp, "due_date": p.lmp + timedelta(days=280),
+            "weeks": week, "days": days % 7, "stage": 1 if week < 14 else 2 if week < 28 else 3}
+
+class Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+class Credentials(Strict):
+    email: str = Field(min_length=5, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    password: str = Field(min_length=10, max_length=128)
+
+class Registration(Credentials):
+    name: str = Field(min_length=1, max_length=100)
+
+def start_session(response, db, user):
+    token = secrets.token_urlsafe(32)
+    db.add(LoginSession(token_hash=hashlib.sha256(token.encode()).hexdigest(), user_id=user.id,
+                        expires_at=now() + timedelta(days=7)))
+    response.set_cookie("bloom_session", token, httponly=True, secure=SECURE, samesite="strict", max_age=604800)
+
+@app.post("/api/auth/register", status_code=201)
+def register(data: Registration, response: Response, db: DB):
+    user = User(name=data.name.strip(), email=data.email.lower().strip(), password_hash=password_hash(data.password))
+    if not user.name:
+        raise HTTPException(422, "Name is required")
+    db.add(user)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Unable to register with this email")
+    start_session(response, db, user)
+    audit(db, user, "register", user.id)
+    db.commit()
+    return {"id": user.id, "name": user.name, "role": user.role}
+
+@app.post("/api/auth/login")
+def login(data: Credentials, response: Response, db: DB):
+    user = db.scalar(select(User).where(User.email == data.email.lower().strip()))
+    stored = user.password_hash if user else password_hash("dummy-password-for-timing")
+    if not hmac.compare_digest(password_hash(data.password, stored.split(":")[0]), stored) or not user:
+        raise HTTPException(401, "Email or password is incorrect")
+    start_session(response, db, user)
+    audit(db, user, "login", user.id)
+    db.commit()
+    return {"id": user.id, "name": user.name, "role": user.role}
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, db: DB, user: AUTH):
+    session = db.get(LoginSession, hashlib.sha256(request.cookies["bloom_session"].encode()).hexdigest())
+    db.delete(session)
+    db.commit()
+    response.delete_cookie("bloom_session")
+    return {"ok": True}
+
+@app.get("/api/me")
+def me(user: AUTH):
+    return {"id": user.id, "name": user.name, "role": user.role}
+
+class PregnancyInput(Strict):
+    lmp: date
+    label: str = Field(default="My pregnancy", min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def dates(self):
+        if not 0 <= (date.today() - self.lmp).days <= 308:
+            raise ValueError("Last menstrual period must be within the last 44 weeks")
+        return self
+
+@app.get("/api/pregnancies")
+def pregnancies(db: DB, user: AUTH):
+    return [pregnancy_json(p) for p in db.scalars(select(Pregnancy).where(Pregnancy.user_id == user.id).order_by(Pregnancy.lmp.desc(), Pregnancy.id.desc()))]
+
+@app.post("/api/pregnancies", status_code=201)
+def create_pregnancy(data: PregnancyInput, db: DB, user: AUTH):
+    p = Pregnancy(user_id=user.id, **data.model_dump())
+    db.add(p)
+    db.flush()
+    audit(db, user, "pregnancy.create", p.id)
+    db.commit()
+    return pregnancy_json(p)
+
+class Measurements(Strict):
+    Age: float = Field(ge=10, le=60)
+    BodyTempF: float = Field(ge=90, le=110)
+    HeartRate: float = Field(ge=30, le=220)
+    SystolicBP: float = Field(ge=60, le=260)
+    DiastolicBP: float = Field(ge=30, le=160)
+    BMI: float = Field(ge=10, le=70)
+    HbA1c: float = Field(ge=2, le=20)
+    FastingGlucose: float = Field(ge=20, le=600)
+
+    @model_validator(mode="after")
+    def pressure(self):
+        if self.SystolicBP <= self.DiastolicBP:
+            raise ValueError("Systolic pressure must exceed diastolic pressure")
+        return self
+
+UNITS = {"Age": "years", "BodyTempF": "degF", "HeartRate": "bpm", "SystolicBP": "mmHg", "DiastolicBP": "mmHg", "BMI": "kg/m2", "HbA1c": "%", "FastingGlucose": "mg/dL"}
+
+class ObservationInput(Strict):
+    observed_at: datetime
+    values: Measurements
+    units: dict[str, str]
+
+    @model_validator(mode="after")
+    def validate_record(self):
+        if self.observed_at.tzinfo is None:
+            raise ValueError("Observation timestamp must include a timezone")
+        if self.observed_at > now() + timedelta(minutes=5):
+            raise ValueError("Observation cannot be in the future")
+        if self.units != UNITS:
+            raise ValueError("All eight measurements require the specified units")
+        return self
+
+@app.post("/api/pregnancies/{pid}/observations", status_code=201)
+def record(pid: int, data: ObservationInput, db: DB, user: AUTH):
+    p = owned(db, user, pid)
+    if data.observed_at.date() < p.lmp:
+        raise HTTPException(422, "Observation predates this pregnancy")
+    observation = Observation(pregnancy_id=pid, observed_at=data.observed_at.astimezone(timezone.utc),
+                              values=data.values.model_dump(), units=data.units)
+    db.add(observation)
+    db.flush()
+    audit(db, user, "observation.create", observation.id)
+    db.commit()
+    return {"id": observation.id}
+
+@app.post("/api/observations/{oid}/predict")
+def predict(oid: int, db: DB, user: AUTH):
+    observation = db.get(Observation, oid)
+    if not observation:
+        raise HTTPException(404, "Observation not found")
+    owned(db, user, observation.pregnancy_id)
+    existing = db.scalar(select(Prediction).where(Prediction.observation_id == oid))
+    if existing:
+        return existing.result
+    try:
+        result = inference.predict(observation.values)
+    except Exception:
+        raise HTTPException(503, inference.UNIT_ISSUE)
+    meta = inference.metadata()
+    prediction = Prediction(pregnancy_id=observation.pregnancy_id, observation_id=oid,
+                            model_version=meta["version"], result={**result, "model_version": meta["version"]})
+    db.add(prediction)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return db.scalar(select(Prediction).where(Prediction.observation_id == oid)).result
+    if result["category"] in {"mid", "high"}:
+        db.add(Notification(user_id=user.id, pregnancy_id=observation.pregnancy_id, prediction_id=prediction.id,
+                            message="An elevated research risk estimate was recorded. Contact your maternity care team to review these measurements. This estimate is not a diagnosis."))
+    audit(db, user, "prediction.create", prediction.id)
+    db.commit()
+    return prediction.result
+
+@app.get("/api/pregnancies/{pid}/dashboard")
+def dashboard(pid: int, db: DB, user: AUTH):
+    p = owned(db, user, pid)
+    observations = list(db.scalars(select(Observation).where(Observation.pregnancy_id == pid).order_by(Observation.observed_at, Observation.id)))
+    predictions = {x.observation_id: x for x in db.scalars(select(Prediction).where(Prediction.pregnancy_id == pid))}
+    stage = pregnancy_json(p)["stage"]
+    latest = predictions.get(observations[-1].id) if observations else None
+    category = latest.result["category"] if latest else "all"
+    guidance = db.scalars(select(Guidance).where(Guidance.reviewed == True, Guidance.stage == stage,
+                                                Guidance.category.in_(["all", category])))
+    return {"pregnancy": pregnancy_json(p), "observations": [
+        {"id": o.id, "observed_at": o.observed_at.replace(tzinfo=timezone.utc), "values": o.values,
+         "prediction": predictions[o.id].result if o.id in predictions else None} for o in observations],
+        "guidance": [{"id": g.id, "title": g.title, "body": g.body, "source_url": g.source_url} for g in guidance],
+        "notifications": [{"id": n.id, "message": n.message, "read": n.read, "created_at": n.created_at}
+                          for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
+
+@app.patch("/api/notifications/{nid}/read")
+def read_notification(nid: int, db: DB, user: AUTH):
+    n = db.get(Notification, nid)
+    if not n or n.user_id != user.id:
+        raise HTTPException(404, "Notification not found")
+    n.read = True
+    audit(db, user, "notification.read", nid)
+    db.commit()
+    return {"ok": True}
+
+@app.post("/api/pregnancies/{pid}/guidance/{gid}/delivered")
+def guidance_delivery(pid: int, gid: int, db: DB, user: AUTH):
+    p = owned(db, user, pid)
+    g = db.get(Guidance, gid)
+    if not g or not g.reviewed or g.stage != pregnancy_json(p)["stage"]:
+        raise HTTPException(404, "Reviewed guidance not found for this stage")
+    delivery = db.scalar(select(GuidanceDelivery).where(GuidanceDelivery.pregnancy_id == pid, GuidanceDelivery.guidance_id == gid))
+    if not delivery:
+        db.add(GuidanceDelivery(pregnancy_id=pid, guidance_id=gid))
+        audit(db, user, "guidance.delivered", gid)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+    return {"ok": True}
+
+@app.get("/api/model")
+def model(user: AUTH):
+    return inference.metadata()
+
+class GuidanceInput(Strict):
+    title: str = Field(min_length=1, max_length=150)
+    body: str = Field(min_length=1, max_length=4000)
+    stage: int = Field(ge=1, le=3)
+    category: Literal["all", "low", "mid", "high"]
+    source_url: str = Field(max_length=500, pattern=r"^https://")
+
+@app.post("/api/admin/guidance", status_code=201)
+def add_guidance(data: GuidanceInput, db: DB, user: ADMIN):
+    g = Guidance(**data.model_dump())
+    db.add(g)
+    db.flush()
+    audit(db, user, "guidance.draft", g.id)
+    db.commit()
+    return {"id": g.id}
+
+@app.post("/api/admin/guidance/{gid}/review")
+def review_guidance(gid: int, db: DB, user: ADMIN):
+    g = db.get(Guidance, gid)
+    if not g:
+        raise HTTPException(404, "Guidance not found")
+    g.reviewed, g.reviewer_id, g.reviewed_at = True, user.id, now()
+    audit(db, user, "guidance.publish", gid)
+    db.commit()
+    return {"ok": True}
+
+@app.get("/api/admin")
+def administration(db: DB, user: ADMIN):
+    return {"guidance": [{"id": g.id, "title": g.title, "stage": g.stage, "category": g.category,
+                          "reviewed": g.reviewed, "body": g.body, "source_url": g.source_url} for g in db.scalars(select(Guidance))],
+            "models": [m.metadata_json for m in db.scalars(select(ModelRegistry))],
+            "audit": [{"action": a.action, "resource": a.resource, "user_id": a.user_id, "created_at": a.created_at}
+                      for a in db.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(100))]}
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "frontend", html=True), name="web")

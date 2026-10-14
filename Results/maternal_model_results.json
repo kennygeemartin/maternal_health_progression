@@ -1,0 +1,477 @@
+{
+  "random_state": 42,
+  "dataset_profiles": {
+    "mendeley_primary": {
+      "raw_records": 6103,
+      "removed_outliers": 45,
+      "clean_records": 6058,
+      "missing_values": 0,
+      "duplicate_clinical_rows": 1,
+      "class_counts": {
+        "mid risk": 2043,
+        "high risk": 2016,
+        "low risk": 1999
+      },
+      "features": [
+        "Age",
+        "BodyTempF",
+        "HeartRate",
+        "SystolicBP",
+        "DiastolicBP",
+        "BMI",
+        "HbA1c",
+        "FastingGlucose"
+      ]
+    },
+    "uci_secondary": {
+      "raw_records": 1014,
+      "exact_duplicate_rows_removed": 562,
+      "implausible_heart_rate_rows_removed": 1,
+      "clean_records": 451,
+      "missing_values": 0,
+      "class_counts": {
+        "low risk": 233,
+        "high risk": 112,
+        "mid risk": 106
+      },
+      "features": [
+        "Age",
+        "BodyTemp",
+        "HeartRate",
+        "SystolicBP",
+        "DiastolicBP",
+        "FastingGlucose"
+      ]
+    }
+  },
+  "split_counts": {
+    "train": {
+      "total": 4240,
+      "mid risk": 1430,
+      "high risk": 1411,
+      "low risk": 1399
+    },
+    "validation": {
+      "total": 909,
+      "mid risk": 306,
+      "high risk": 303,
+      "low risk": 300
+    },
+    "test": {
+      "total": 909,
+      "mid risk": 307,
+      "high risk": 302,
+      "low risk": 300
+    }
+  },
+  "features": [
+    "Age",
+    "BodyTempF",
+    "HeartRate",
+    "SystolicBP",
+    "DiastolicBP",
+    "BMI",
+    "HbA1c",
+    "FastingGlucose"
+  ],
+  "common_transfer_features": [
+    "Age",
+    "BodyTempF",
+    "HeartRate",
+    "SystolicBP",
+    "DiastolicBP",
+    "FastingGlucose"
+  ],
+  "model_training": {
+    "proposed_lstm": {
+      "framework": "PyTorch 2.14.1 CPU",
+      "architecture": "LSTM(input_size=1, hidden_size=50, layers=1) + dropout(0.20) + linear(3)",
+      "input_shape": [
+        8,
+        1
+      ],
+      "sequence_note": "Eight static clinical features serialized as synthetic timesteps; not genuine longitudinal data.",
+      "optimizer": "Adam(lr=0.001, weight_decay=0.0001)",
+      "batch_size": 1024,
+      "max_epochs": 180,
+      "early_stopping_patience": 15,
+      "best_epoch": 178,
+      "best_validation_loss": 0.5336418747901917,
+      "class_weighting": "inverse class frequency on training labels"
+    },
+    "ann_baseline": {
+      "architecture": "64-ReLU-dropout(0.25)-32-ReLU-dropout(0.25)-3",
+      "best_epoch": 180
+    },
+    "logistic_regression": {
+      "class_weight": "balanced",
+      "max_iter": 2000
+    },
+    "random_forest": {
+      "n_estimators": 300,
+      "class_weight": "balanced_subsample"
+    }
+  },
+  "main_test_results": [
+    {
+      "model": "Proposed LSTM",
+      "accuracy": 0.7601760176017601,
+      "accuracy_95ci_low": 0.7313606105508733,
+      "accuracy_95ci_high": 0.7868015766237689,
+      "macro_precision": 0.7569212103467704,
+      "macro_recall": 0.7614148168920911,
+      "macro_f1": 0.755133508740612,
+      "weighted_precision": 0.756444172451208,
+      "weighted_recall": 0.7601760176017601,
+      "weighted_f1": 0.7542962099505434,
+      "auc_macro": 0.9100028770069782,
+      "auc_weighted": 0.9094923949591643,
+      "brier_score": 0.3249153792858124,
+      "log_loss": 0.5245486497879028,
+      "per_class": {
+        "low risk": {
+          "precision": 0.7933884297520661,
+          "recall": 0.96,
+          "f1": 0.8687782805429864,
+          "support": 300
+        },
+        "mid risk": {
+          "precision": 0.6847826086956522,
+          "recall": 0.6156351791530945,
+          "f1": 0.6483704974271012,
+          "support": 307
+        },
+        "high risk": {
+          "precision": 0.7925925925925926,
+          "recall": 0.7086092715231788,
+          "f1": 0.7482517482517482,
+          "support": 302
+        }
+      },
+      "confusion_matrix": [
+        [
+          288,
+          12,
+          0
+        ],
+        [
+          62,
+          189,
+          56
+        ],
+        [
+          13,
+          75,
+          214
+        ]
+      ]
+    },
+    {
+      "model": "ANN baseline",
+      "accuracy": 0.8712871287128713,
+      "accuracy_95ci_low": 0.8479439752408277,
+      "accuracy_95ci_high": 0.8915052347864102,
+      "macro_precision": 0.8714486741246232,
+      "macro_recall": 0.8717376735624249,
+      "macro_f1": 0.8705450671498361,
+      "weighted_precision": 0.8709426786450523,
+      "weighted_recall": 0.8712871287128713,
+      "weighted_f1": 0.8700702051074052,
+      "auc_macro": 0.9596660588023628,
+      "auc_weighted": 0.959470077175553,
+      "brier_score": 0.19881145656108856,
+      "log_loss": 0.3465971350669861,
+      "per_class": {
+        "low risk": {
+          "precision": 0.9369085173501577,
+          "recall": 0.99,
+          "f1": 0.9627228525121556,
+          "support": 300
+        },
+        "mid risk": {
+          "precision": 0.8056426332288401,
+          "recall": 0.8371335504885994,
+          "f1": 0.8210862619808307,
+          "support": 307
+        },
+        "high risk": {
+          "precision": 0.8717948717948718,
+          "recall": 0.7880794701986755,
+          "f1": 0.8278260869565217,
+          "support": 302
+        }
+      },
+      "confusion_matrix": [
+        [
+          297,
+          3,
+          0
+        ],
+        [
+          15,
+          257,
+          35
+        ],
+        [
+          5,
+          59,
+          238
+        ]
+      ]
+    },
+    {
+      "model": "Logistic regression",
+      "accuracy": 0.5863586358635864,
+      "accuracy_95ci_low": 0.5540445247767886,
+      "accuracy_95ci_high": 0.6179458840739912,
+      "macro_precision": 0.5862572299725927,
+      "macro_recall": 0.5873983552765614,
+      "macro_f1": 0.5786200685926647,
+      "weighted_precision": 0.5860039809024624,
+      "weighted_recall": 0.5863586358635864,
+      "weighted_f1": 0.5780221643094021,
+      "auc_macro": 0.7354618306860626,
+      "auc_weighted": 0.7349751698667051,
+      "brier_score": 0.5589673721440342,
+      "log_loss": 0.9299363325527972,
+      "per_class": {
+        "low risk": {
+          "precision": 0.5960099750623441,
+          "recall": 0.7966666666666666,
+          "f1": 0.68188302425107,
+          "support": 300
+        },
+        "mid risk": {
+          "precision": 0.5441176470588235,
+          "recall": 0.4820846905537459,
+          "f1": 0.5112262521588946,
+          "support": 307
+        },
+        "high risk": {
+          "precision": 0.6186440677966102,
+          "recall": 0.48344370860927155,
+          "f1": 0.5427509293680297,
+          "support": 302
+        }
+      },
+      "confusion_matrix": [
+        [
+          239,
+          44,
+          17
+        ],
+        [
+          86,
+          148,
+          73
+        ],
+        [
+          76,
+          80,
+          146
+        ]
+      ]
+    },
+    {
+      "model": "Random forest",
+      "accuracy": 0.9922992299229924,
+      "accuracy_95ci_low": 0.9841900018864059,
+      "accuracy_95ci_high": 0.9962648765941541,
+      "macro_precision": 0.9923976679692453,
+      "macro_recall": 0.9923096835429385,
+      "macro_f1": 0.9923302958961789,
+      "weighted_precision": 0.9923413493257629,
+      "weighted_recall": 0.9922992299229924,
+      "weighted_f1": 0.992296864438896,
+      "auc_macro": 0.9986954234066999,
+      "auc_weighted": 0.9986866765672967,
+      "brier_score": 0.02752448355946706,
+      "log_loss": 0.07219783172955128,
+      "per_class": {
+        "low risk": {
+          "precision": 0.9966777408637874,
+          "recall": 1.0,
+          "f1": 0.9983361064891847,
+          "support": 300
+        },
+        "mid risk": {
+          "precision": 0.9838709677419355,
+          "recall": 0.993485342019544,
+          "f1": 0.9886547811993517,
+          "support": 307
+        },
+        "high risk": {
+          "precision": 0.9966442953020134,
+          "recall": 0.9834437086092715,
+          "f1": 0.99,
+          "support": 302
+        }
+      },
+      "confusion_matrix": [
+        [
+          300,
+          0,
+          0
+        ],
+        [
+          1,
+          305,
+          1
+        ],
+        [
+          0,
+          5,
+          297
+        ]
+      ]
+    }
+  ],
+  "proposed_lstm_per_class": {
+    "low risk": {
+      "precision": 0.7933884297520661,
+      "recall": 0.96,
+      "f1": 0.8687782805429864,
+      "support": 300
+    },
+    "mid risk": {
+      "precision": 0.6847826086956522,
+      "recall": 0.6156351791530945,
+      "f1": 0.6483704974271012,
+      "support": 307
+    },
+    "high risk": {
+      "precision": 0.7925925925925926,
+      "recall": 0.7086092715231788,
+      "f1": 0.7482517482517482,
+      "support": 302
+    }
+  },
+  "proposed_lstm_confusion_matrix": [
+    [
+      288,
+      12,
+      0
+    ],
+    [
+      62,
+      189,
+      56
+    ],
+    [
+      13,
+      75,
+      214
+    ]
+  ],
+  "uci_transfer_result": {
+    "accuracy": 0.24833702882483372,
+    "accuracy_95ci_low": 0.2106995292203932,
+    "accuracy_95ci_high": 0.29022562802116075,
+    "macro_precision": 0.0827790096082779,
+    "macro_recall": 0.3333333333333333,
+    "macro_f1": 0.13262285375962107,
+    "weighted_precision": 0.06167127988554629,
+    "weighted_recall": 0.24833702882483372,
+    "weighted_f1": 0.09880549637080417,
+    "auc_macro": 0.5564793587302627,
+    "auc_weighted": 0.5651814515403676,
+    "brier_score": 1.443779468536377,
+    "log_loss": 9.090116500854492,
+    "per_class": {
+      "low risk": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 233
+      },
+      "mid risk": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 106
+      },
+      "high risk": {
+        "precision": 0.24833702882483372,
+        "recall": 1.0,
+        "f1": 0.3978685612788632,
+        "support": 112
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        233
+      ],
+      [
+        0,
+        0,
+        106
+      ],
+      [
+        0,
+        0,
+        112
+      ]
+    ]
+  },
+  "uci_benchmark_result": {
+    "accuracy": 0.6176470588235294,
+    "accuracy_95ci_low": 0.49880494200915176,
+    "accuracy_95ci_high": 0.7239072470289543,
+    "macro_precision": 0.5497619047619048,
+    "macro_recall": 0.5751050420168067,
+    "macro_f1": 0.5436507936507936,
+    "weighted_precision": 0.5958823529411765,
+    "weighted_recall": 0.6176470588235294,
+    "weighted_f1": 0.5931372549019607,
+    "auc_macro": 0.6961784478977385,
+    "auc_weighted": 0.7077873827441302,
+    "brier_score": 0.5806942582130432,
+    "log_loss": 0.9695792198181152,
+    "per_class": {
+      "low risk": {
+        "precision": 0.7142857142857143,
+        "recall": 0.7142857142857143,
+        "f1": 0.7142857142857143,
+        "support": 35
+      },
+      "mid risk": {
+        "precision": 0.375,
+        "recall": 0.1875,
+        "f1": 0.25,
+        "support": 16
+      },
+      "high risk": {
+        "precision": 0.56,
+        "recall": 0.8235294117647058,
+        "f1": 0.6666666666666666,
+        "support": 17
+      }
+    },
+    "confusion_matrix": [
+      [
+        25,
+        4,
+        6
+      ],
+      [
+        8,
+        3,
+        5
+      ],
+      [
+        2,
+        1,
+        14
+      ]
+    ]
+  },
+  "uci_transfer_training": {
+    "best_epoch": 180,
+    "note": "Mendeley-trained six-feature LSTM applied to all cleaned UCI records after mmol/L to mg/dL glucose conversion."
+  },
+  "uci_benchmark_training": {
+    "best_epoch": 64
+  }
+}
