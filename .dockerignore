@@ -9,3 +9,7 @@ __pycache__
 Results/*.csv
 Results/*.xlsx
 Results/*.zip
+.deploy-tools
+.deploy-auth
+.vercel
+bloom-github-upload.zip

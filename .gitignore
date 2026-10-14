@@ -15,3 +15,7 @@ Results/*.html
 # A separate implementation appeared during development; it is not part of Bloom.
 app/
 tests/test_api.py
+.deploy-tools/
+.deploy-auth/
+.vercel/
+bloom-github-upload.zip
