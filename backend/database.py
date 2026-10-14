@@ -8,13 +8,13 @@ def now():
     return datetime.now(timezone.utc)
 
 ENV = os.getenv("APP_ENV", "development")
-URL = os.getenv("DATABASE_URL", "sqlite:///./maternal.db")
+URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite:///./maternal.db"
 if URL.startswith("postgres://"):
     URL = "postgresql+psycopg://" + URL[len("postgres://"):]
 elif URL.startswith("postgresql://"):
     URL = "postgresql+psycopg://" + URL[len("postgresql://"):]
 if os.getenv("VERCEL") and not URL.startswith("postgresql"):
-    raise RuntimeError("Vercel requires DATABASE_URL for an external PostgreSQL database")
+    raise RuntimeError("Connect PostgreSQL in Vercel and provide DATABASE_URL or POSTGRES_URL")
 if ENV == "production" and not URL.startswith("postgresql"):
     raise RuntimeError("Production requires PostgreSQL")
 engine = create_engine(URL, connect_args={"check_same_thread": False} if URL.startswith("sqlite") else {},

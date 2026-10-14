@@ -51,7 +51,7 @@ Tests cover real artifact inference, probability parity, record validation, acco
 ### Vercel
 
 1. Import the GitHub repository into Vercel with the project root set to the repository root. `pyproject.toml` selects `backend.main:app` explicitly; do not select the separate `app/` implementation.
-2. Connect a PostgreSQL database through Vercel Marketplace (for example Neon). Set `DATABASE_URL` to its connection URL, keeping required SSL query parameters. Both `postgres://` and `postgresql://` are normalized to the installed psycopg driver.
+2. Connect a PostgreSQL database through Vercel Marketplace (for example Neon). The app accepts `DATABASE_URL` or `POSTGRES_URL` (with `DATABASE_URL` taking priority). Keep required SSL query parameters. Both `postgres://` and `postgresql://` are normalized to the installed psycopg driver.
 3. Set `APP_ENV=production` and `COOKIE_SECURE=true` for deployed environments. Use a separate PostgreSQL database for preview environments. SQLite is deliberately rejected on Vercel because function storage is not persistent.
 4. Enable Fluid compute and, if the dependency bundle exceeds the standard Python limit, enable Large Functions with `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. PyTorch and scientific packages can make the function large. Verify the actual deployment build rather than assuming local Windows package sizes apply to Linux.
 5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. The model-unit guard remains active. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
