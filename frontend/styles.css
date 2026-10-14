@@ -3,3 +3,13 @@
 input[type="checkbox"]{width:auto;min-width:18px;height:18px;accent-color:var(--green);vertical-align:middle;margin-right:8px}
 #verification-status:not(:empty){padding:16px 24px;background:#e9edbb;color:#243d36;line-height:1.6}
 #pregnancy-settings .card{border:0;padding:0;box-shadow:none;margin-bottom:24px}
+
+.care-banner{position:relative;isolation:isolate;overflow:hidden;min-height:220px;aspect-ratio:3.2/1;border-radius:13px;margin:0 0 22px;background:#eef1e6}
+.care-banner>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
+.care-banner::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,rgba(246,247,242,.96),rgba(246,247,242,.86) 29%,rgba(246,247,242,.08) 58%,transparent 75%)}
+.care-banner-copy{position:relative;z-index:1;padding:30px;max-width:47%}
+.care-banner-copy .eyebrow{color:var(--green);margin-bottom:12px;font-size:9px;letter-spacing:1.6px}
+.care-banner-copy h2{font-family:Georgia,serif;font-weight:400;font-size:32px;line-height:1.15;margin-bottom:13px}
+.care-banner-copy p{font-size:12px;line-height:1.6;margin:0;color:#405d50;max-width:280px}
+@media(max-width:1100px) and (min-width:761px){.care-banner-copy{max-width:54%;padding:25px}.care-banner-copy h2{font-size:28px}}
+@media(max-width:760px){.care-banner{aspect-ratio:auto;min-height:0}.care-banner>img{position:static;display:block;height:175px;object-position:76% center}.care-banner::after{display:none}.care-banner-copy{padding:20px 22px;max-width:none}.care-banner-copy h2{font-size:27px;margin-bottom:8px}.care-banner-copy p{max-width:none}.care-banner-copy .eyebrow{font-size:8px}}

@@ -1,0 +1,7 @@
+# Dashboard picture banner
+
+Asset: `frontend/assets/maternal-care-banner.jpg`, 2156 x 729 pixels. Generated using the built-in image generation tool on 2026-10-14 and saved as a lightweight JPEG for the app. The portrayed person is fictional. The original PNG remains in the image generator output directory. The banner appears on the overview dashboard; mobile displays the photograph above the caption. Alternative text describes the photograph. The service worker caches this static asset only, alongside the existing application shell.
+
+## Final generation prompt
+
+Create a wide horizontal photographic picture banner for Bloom, a maternal health support web dashboard used by first-time mothers in Nigeria. Editorial lifestyle photography, calm and welcoming. A fictional adult Black pregnant woman in a soft sage-green maternity dress sits comfortably near a sunlit window in a simple airy home, one hand resting naturally on her clothed pregnant abdomen, quietly smiling. Natural realistic hands and facial details, soft daylight, cream and muted sage palette matching dark evergreen #24594e interface. Frame her upper body and abdomen together toward the right half with airy softly blurred neutral room toward the left, suitable for a wide dashboard banner and a crop on mobile. Supportive, dignified, everyday mood. No text, no logos, no medical equipment, no anatomical cutaways, no collage or UI mockup. Image should be landscape and intentionally panoramic, approximately 3:1 composition.

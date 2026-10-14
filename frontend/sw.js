@@ -1,6 +1,6 @@
 // Cache only the application shell. Health records and API responses never enter the cache.
-const CACHE = 'bloom-shell-v4';
-const SHELL = ['/', '/styles.css', '/app.js', '/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'bloom-shell-v5';
+const SHELL = ['/', '/styles.css', '/app.js', '/icon.svg', '/manifest.webmanifest', '/assets/maternal-care-banner.jpg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
