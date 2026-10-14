@@ -92,3 +92,5 @@ The authenticated daily cron runs at 07:00 UTC (08:00 Lagos, subject to provider
 Resend idempotency keys and persisted claims reduce duplicates. A delivery attempt older than 23 hours requires operator review because the provider idempotency window may have expired. Failed deliveries never become fictitious successful notices. Credentials are not yet supplied, so actual inbox delivery has not been tested.
 
 [Vercel cron authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs) uses `CRON_SECRET` automatically as a Bearer header. The worker rejects requests without the matching secret.
+
+Temperature entry and display use Celsius. New records retain `BodyTempC` / `degC`; the hosted adapter converts to Fahrenheit only for the provider. Existing Fahrenheit records remain readable and display in Celsius. Per-field unit labels and help notes replace unit dropdowns.

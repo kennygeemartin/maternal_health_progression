@@ -324,7 +324,8 @@ def email_worker(request: Request, db: DB):
 
 class Measurements(Strict):
     Age: float = Field(ge=10, le=60)
-    BodyTempF: float = Field(ge=90, le=110)
+    BodyTempC: float | None = Field(default=None, ge=32, le=44)
+    BodyTempF: float | None = Field(default=None, ge=90, le=110)
     HeartRate: float = Field(ge=30, le=220)
     SystolicBP: float = Field(ge=60, le=260)
     DiastolicBP: float = Field(ge=30, le=160)
@@ -334,11 +335,13 @@ class Measurements(Strict):
 
     @model_validator(mode="after")
     def pressure(self):
+        if (self.BodyTempC is None) == (self.BodyTempF is None):
+            raise ValueError("Record exactly one temperature: BodyTempC in Celsius or a legacy BodyTempF reading")
         if self.SystolicBP <= self.DiastolicBP:
             raise ValueError("Systolic pressure must exceed diastolic pressure")
         return self
 
-UNITS = {"Age": "years", "BodyTempF": "degF", "HeartRate": "bpm", "SystolicBP": "mmHg", "DiastolicBP": "mmHg", "BMI": "kg/m2", "HbA1c": "%", "FastingGlucose": "mg/dL"}
+UNITS = {"Age": "years", "BodyTempC": "degC", "BodyTempF": "degF", "HeartRate": "bpm", "SystolicBP": "mmHg", "DiastolicBP": "mmHg", "BMI": "kg/m2", "HbA1c": "%", "FastingGlucose": "mg/dL"}
 
 class ObservationInput(Strict):
     observed_at: datetime

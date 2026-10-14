@@ -50,7 +50,8 @@ def feature_payload(values):
     # UCI defines BS in mmol/L. The observation form stores glucose in mg/dL.
     return {"Age": values["Age"], "SystolicBP": values["SystolicBP"],
             "DiastolicBP": values["DiastolicBP"], "BS": values["FastingGlucose"] / 18.0182,
-            "BodyTemp": values["BodyTempF"], "HeartRate": values["HeartRate"]}
+            "BodyTemp": values["BodyTempC"] * 9 / 5 + 32 if "BodyTempC" in values else values["BodyTempF"],
+            "HeartRate": values["HeartRate"]}
 
 def predict(values):
     if provider() == "huggingface":

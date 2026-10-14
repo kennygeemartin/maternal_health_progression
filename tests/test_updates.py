@@ -131,3 +131,23 @@ def test_hosted_contract_units_revision_and_html_ignored(monkeypatch):
     count=len(requests)
     with pytest.raises(hosted_model.ModelUnavailable,match='does not support'):hosted_model.predict({**VALUES,'FastingGlucose':88})
     assert len(requests)==count
+
+def test_celsius_records_units_and_provider_conversion():
+    values={key:value for key,value in VALUES.items() if key!='BodyTempF'}
+    values['BodyTempC']=37
+    units={key:value for key,value in UNITS.items() if key!='BodyTempF'}
+    units['BodyTempC']='degC'
+    with TestClient(app) as client:
+        pid=setup(client,'celsius@example.invalid')
+        route=f'/api/pregnancies/{pid}/observations'
+        payload={'observed_at':datetime.now(timezone.utc).isoformat(),'values':values,'units':units}
+        assert client.post(route,headers=HEADERS,json=payload).status_code==201
+        stored=client.get(f'/api/pregnancies/{pid}/dashboard').json()['observations'][0]['values']
+        assert stored['BodyTempC']==37 and 'BodyTempF' not in stored
+        assert hosted_model.feature_payload(stored)['BodyTemp']==pytest.approx(98.6)
+        bad={**payload,'units':{**units,'BodyTempC':'degF'}}
+        assert client.post(route,headers=HEADERS,json=bad).status_code==422
+        bad={**payload,'values':{**values,'BodyTempC':98.6}}
+        assert client.post(route,headers=HEADERS,json=bad).status_code==422
+        bad={**payload,'values':{**values,'BodyTempF':98.6},'units':{**units,'BodyTempF':'degF'}}
+        assert client.post(route,headers=HEADERS,json=bad).status_code==422

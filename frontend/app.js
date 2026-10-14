@@ -1,14 +1,15 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const temperatureC = values => values?.BodyTempC ?? (values?.BodyTempF === undefined ? null : Number(((values.BodyTempF-32)*5/9).toFixed(1)));
 const dateText = value => new Date(value).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'});
 const state = {user:null, pregnancies:[], pid:null, dashboard:null, view:'overview', registering:false};
 const fields = [
-  ['Age','Age','years',10,60], ['BodyTempF','Body temperature','°F',90,110],
+  ['Age','Age','years',10,60], ['BodyTempC','Body temperature','°C',32,44],
   ['HeartRate','Heart rate','bpm',30,220], ['SystolicBP','Systolic pressure','mmHg',60,260],
   ['DiastolicBP','Diastolic pressure','mmHg',30,160], ['BMI','Body mass index','kg/m²',10,70],
   ['HbA1c','HbA1c','%',2,20], ['FastingGlucose','Fasting glucose','mg/dL',20,600]
 ];
-const units = {Age:'years', BodyTempF:'degF', HeartRate:'bpm', SystolicBP:'mmHg', DiastolicBP:'mmHg', BMI:'kg/m2', HbA1c:'%', FastingGlucose:'mg/dL'};
+const units = {Age:'years', BodyTempC:'degC', HeartRate:'bpm', SystolicBP:'mmHg', DiastolicBP:'mmHg', BMI:'kg/m2', HbA1c:'%', FastingGlucose:'mg/dL'};
 
 async function api(path, options={}) {
   let response;
@@ -123,10 +124,10 @@ function render() {
   $('due-date').textContent='Estimated due date · '+dateText(p.due_date);
   $('pregnancy-progress').style.width=Math.min(100,p.weeks/40*100)+'%';
   $('risk-content').innerHTML=result?`<span class="risk-badge ${result.category}">${result.category==='mid'?'Mid':result.category==='high'?'High':'Low'} research risk estimate</span><p class="risk-description">${result.category==='low'?'Keep your care team informed as your pregnancy progresses.':'Contact your maternity care team to review these measurements.'}</p><div class="probabilities">${Object.entries(result.probabilities).map(([k,v])=>`<span>${k[0].toUpperCase()+k.slice(1)} ${(v*100).toFixed(1)}%</span>`).join('')}</div>${result.outside_training_range.length?'<p class="error">Some measurements are outside the model’s training range.</p>':''}`:`<h2>Assessment unavailable</h2><p class="risk-description">${state.dashboard.preferences.remote_model?'Enable external research assessments in Pregnancy settings. The public model supports limited measurement ranges.':'The local model units need verification.'} ${latest?'Your visit is safely recorded.':'You can still log your measurements.'}</p>`;
-  const metrics=[['Blood pressure',latest?`${latest.values.SystolicBP}/${latest.values.DiastolicBP}`:'—','mmHg'],['Heart rate',latest?.values.HeartRate??'—','bpm'],['Body temperature',latest?.values.BodyTempF??'—','°F'],['Fasting glucose',latest?.values.FastingGlucose??'—','mg/dL']];
+  const metrics=[['Blood pressure',latest?`${latest.values.SystolicBP}/${latest.values.DiastolicBP}`:'—','mmHg'],['Heart rate',latest?.values.HeartRate??'—','bpm'],['Body temperature',temperatureC(latest?.values)??'—','°C'],['Fasting glucose',latest?.values.FastingGlucose??'—','mg/dL']];
   $('metric-cards').innerHTML=metrics.map(([name,value,unit])=>`<article class="metric"><div class="metric-label">${name}</div><div class="metric-value">${value}<small>${unit}</small></div><div class="metric-date">${latest?dateText(latest.observed_at):'No measurements yet'}</div></article>`).join('');
   renderTrend(obs);
-  $('history').innerHTML=obs.length?`<table><thead><tr><th>Visit</th>${fields.map(f=>`<th>${f[1]}<br>${f[2]}</th>`).join('')}<th>Assessment</th></tr></thead><tbody>${[...obs].reverse().map(o=>`<tr><td>${dateText(o.observed_at)}<br><small>${new Date(o.observed_at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></td>${fields.map(f=>`<td>${o.values[f[0]]??'--'}</td>`).join('')}<td>${o.prediction?`<span class="risk-badge ${o.prediction.category}">${o.prediction.category} risk</span>`:`<button class="text-button retry" data-id="${o.id}">Retry assessment</button>`}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Your history starts with your first measurement visit.</div>';
+  $('history').innerHTML=obs.length?`<table><thead><tr><th>Visit</th>${fields.map(f=>`<th>${f[1]}<br>${f[2]}</th>`).join('')}<th>Assessment</th></tr></thead><tbody>${[...obs].reverse().map(o=>`<tr><td>${dateText(o.observed_at)}<br><small>${new Date(o.observed_at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></td>${fields.map(f=>`<td>${(f[0]==='BodyTempC'?temperatureC(o.values):o.values[f[0]])??'--'}</td>`).join('')}<td>${o.prediction?`<span class="risk-badge ${o.prediction.category}">${o.prediction.category} risk</span>`:`<button class="text-button retry" data-id="${o.id}">Retry assessment</button>`}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Your history starts with your first measurement visit.</div>';
   document.querySelectorAll('.retry').forEach(b=>b.addEventListener('click',async()=>{b.disabled=true;try{await api(`/observations/${b.dataset.id}/predict`,{method:'POST'});await loadDashboard();notify('Assessment complete.');}catch(e){notify(e.message,true);b.disabled=false;}}));
   $('guidance-list').innerHTML=guidance.length?guidance.map(g=>`<article class="card"><span class="eyebrow">PUBLISHED - ${g.scope==='month'?'MONTH '+g.month:'TRIMESTER GUIDANCE'}</span><h2>${escapeHTML(g.title)}</h2><p class="content-body">${escapeHTML(g.body)}</p><a href="${escapeHTML(g.source_url)}" target="_blank" rel="noopener noreferrer">Read source ↗</a></article>`).join(''):'<article class="card empty"><h2>Guidance is being prepared.</h2><p>No reviewed content has been published for your stage yet. Speak with your care team for personalised advice.</p></article>';
   $('guidance-teaser').textContent=guidance.length?guidance[0].title:'Reviewed guidance will appear here when your care team publishes it.';
@@ -156,21 +157,21 @@ function renderTrend(obs) {
 
 function measurementFields(){
   const ranges=state.dashboard?.preferences?.remote_model?.input_ranges;
-  const providerNames={FastingGlucose:'BS',BodyTempF:'BodyTemp'};
+  const providerNames={FastingGlucose:'BS',BodyTempC:'BodyTemp'};
   $('measurement-fields').innerHTML=fields.map(([key,label,unit,min,max])=>{
     const optional=['BMI','HbA1c'].includes(key);
     const bounds=ranges?.[providerNames[key]||key];
-    const converted=bounds?.map(value=>key==='FastingGlucose'?(value*18.0182).toFixed(2):value);
-    return `<label>${label}${optional?' (optional)':''}<input name="${key}" aria-describedby="limit-${key}" type="number" step="any" min="${min}" max="${max}" ${optional?'':'required'}><select name="unit_${key}" aria-label="${label} unit"><option value="${units[key]}">${unit}</option></select><small id="limit-${key}">Record ${min} to ${max} ${unit}.${optional?' Not used by the hosted model.':''}${converted?` Hosted assessment supports ${converted[0]} to ${converted[1]} ${unit}; this is a service limit, not a healthy range.`:''}</small></label>`;
+    const converted=bounds?.map(value=>key==='FastingGlucose'?(value*18.0182).toFixed(2):key==='BodyTempC'?((value-32)*5/9).toFixed(2):value);
+    return `<label>${label} (${unit})${optional?' (optional)':''}<input name="${key}" aria-describedby="limit-${key}" type="number" step="any" min="${min}" max="${max}" ${optional?'':'required'}><small id="limit-${key}">Record ${min} to ${max} ${unit}.${optional?' Not used by the hosted model.':''}${converted?` Hosted assessment supports ${converted[0]} to ${converted[1]} ${unit}; this is a service limit, not a healthy range.`:''}</small></label>`;
   }).join('');
 }
 function unsupportedModelFields(values){
   const ranges=state.dashboard?.preferences?.remote_model?.input_ranges;
   if(!ranges)return [];
-  const aliases={FastingGlucose:'BS',BodyTempF:'BodyTemp'};
+  const aliases={FastingGlucose:'BS',BodyTempC:'BodyTemp'};
   return fields.filter(([key])=>{
     const bounds=ranges[aliases[key]||key];
-    const value=key==='FastingGlucose'?values[key]/18.0182:values[key];
+    const value=key==='FastingGlucose'?values[key]/18.0182:key==='BodyTempC'?values[key]*9/5+32:values[key];
     return bounds&&Number.isFinite(value)&&(value<bounds[0]||value>bounds[1]);
   }).map(field=>field[1]);
 }
@@ -187,7 +188,7 @@ $('add-measurement').addEventListener('click',()=>{
   $('measurement-range-status').textContent='';
   const current=new Date(); current.setMinutes(current.getMinutes()-current.getTimezoneOffset());
   $('measurement-form').elements.observed_at.value=current.toISOString().slice(0,16);
-  $('measurement-help').textContent='Enter your actual readings using the units shown. HbA1c is a percentage, not the unverified 30-50 values in the original dataset. Glucose is mg/dL. Unsupported model readings can still be saved; never change them to fit an assessment range.';
+  $('measurement-help').textContent='Enter your actual readings using the units shown. HbA1c is a percentage, not the unverified 30-50 values in the original dataset. Temperature is Celsius (C). Glucose is mg/dL. Unsupported model readings can still be saved; never change them to fit an assessment range.';
   $('measurement-dialog').showModal();
 });
 document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).close()));
