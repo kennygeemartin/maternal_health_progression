@@ -58,6 +58,8 @@ Tests cover real artifact inference, probability parity, record validation, acco
 
 The configuration preserves the same-origin frontend/API and FastAPI security middleware. No database credentials or cloud access tokens are included. Vercel account access and a configured database are required to complete a live deployment.
 
+Vercel's default `pyproject.toml` runtime installs the web/backend packages only. Scientific inference dependencies are an optional `model` extra while the unit-verification guard disables predictions; `requirements.txt` still includes them for local artifact tests. A validated model activation must also enable these dependencies in the deployment environment and recheck bundle limits.
+
 References: [FastAPI on Vercel](https://vercel.com/docs/frameworks/backend/fastapi), [PostgreSQL](https://vercel.com/docs/postgres), [Large Functions](https://vercel.com/changelog/vercel-functions-can-now-be-up-to-5-gb-in-package-size-7yAwSyCig0IQDXUIDistvS/eadf06d6c3).
 
 The source repository is https://github.com/kennygeemartin/maternal_health_progression. GitHub Pages serves static files and cannot run this FastAPI application or its database. Deploy the Dockerfile on a Python/container hosting service and provide a PostgreSQL database; the container respects the provider's `PORT` environment variable. Raw clinical datasets are excluded from GitHub. The three required model artifacts are included without the named training records.
