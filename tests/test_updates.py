@@ -105,9 +105,12 @@ def test_external_consent_and_risk_email(monkeypatch):
         result=client.post(f'/api/observations/{oid}/predict',headers=HEADERS)
         assert result.status_code==200 and result.json()['category']=='high'
         assert len(calls)==1 and len(sent)==2
-        assert 'midwife or doctor' in sent[-1][2] and '135.1365' not in sent[-1][2]
+        assert 'midwife or doctor' in sent[-1][2] and '135.137 mg/dL' in sent[-1][2]
         assert 'not a diagnosis' not in sent[-1][2]
-        assert sent[-1][2].endswith('discuss your next steps.')
+        assert 'pregnancy month 5' in sent[-1][2]
+        assert 'Mid-pregnancy checks' in sent[-1][2]
+        assert 'Temperature: 37.0 ' in sent[-1][2]
+        assert sent[-1][2].endswith('whenever you need advice.')
         assert client.post(f'/api/observations/{oid}/predict',headers=HEADERS).status_code==200
         assert len(sent)==2
 
@@ -183,3 +186,13 @@ def test_refresh_only_unattempted_pending_guidance():
             refreshed.status='failed';refreshed.attempts=1;db.commit()
             retry=mail.queue(db,user,pid,'monthly_guidance','Another subject','Different copy','same-guidance')
             assert retry.id==job.id and retry.body=='Warm copy'
+
+
+def test_care_summary_coverage_is_not_a_clinical_abnormality():
+    from backend.notification_messages import care_summary, care_update
+    result = {'category': 'low', 'review_required': True}
+    body = care_summary(result, {'BodyTempC': 37, 'FastingGlucose': 88}, 2, [], datetime(2026, 10, 15))
+    assert '88 mg/dL' in body and '37.0' in body
+    assert 'does not mean those readings are unhealthy' in body
+    assert 'Blood pressure:' not in body and 'HbA1c:' not in body
+    assert 'promptly' in care_update({'category': 'high', 'review_required': True})

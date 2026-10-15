@@ -15,3 +15,9 @@ The notification screen presents pregnancy guidance and care updates, actual ema
 Existing in-app care notifications use the new presentation based on their saved assessment without rewriting stored audit records. Unattempted queued monthly messages can refresh their wording without creating a duplicate. Already-attempted messages retain their original content for provider idempotency; accepted messages are not resent merely because the wording changed.
 
 Validation: 15 local automated tests passed, with the disposable PostgreSQL test left to CI. Tests cover greeting and closing, preservation of urgent guidance, duplicate prevention and attempted-message identity. Frontend syntax and rendering checks passed for readable statuses, guidance navigation and hidden service error codes for mothers. Tests use synthetic records and mocked delivery; no new real emails were sent during this change.
+
+
+## Personalised care summaries
+New assessments save a care-summary snapshot with the prediction: the actual visit readings (temperature in Celsius), selected pregnancy month, published guidance with source links, questions for the care team and a professional visit recommendation. Retries reuse that snapshot and the existing email idempotency key. Missing readings are omitted, never invented. Dataset coverage is distinguished from a clinical abnormality; high model alerts retain prompt contact advice even when coverage is limited.
+
+This is approved-content assembly, not an LLM. No additional AI provider receives health data. MedGemma was investigated: its model requires access terms, serving infrastructure and use-case validation (https://huggingface.co/google/medgemma-4b-it). A free model download does not establish a free, token-free hosted inference service. Existing sent emails are not resent automatically.

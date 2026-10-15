@@ -378,7 +378,7 @@ def predict(oid: int, db: DB, user: AUTH):
     observation = db.get(Observation, oid)
     if not observation:
         raise HTTPException(404, "Observation not found")
-    owned(db, user, observation.pregnancy_id)
+    pregnancy = owned(db, user, observation.pregnancy_id)
     existing = db.scalar(select(Prediction).where(Prediction.observation_id == oid))
     if existing:
         return existing.result
@@ -391,6 +391,10 @@ def predict(oid: int, db: DB, user: AUTH):
         raise HTTPException(503, str(error))
     except Exception:
         raise HTTPException(503, "Assessment unavailable. " + (inference.UNIT_ISSUE if hosted_model.provider() == "disabled" else "Your measurements remain saved."))
+    month = guidance_service.selected_month(db, pregnancy)
+    entries = guidance_service.content(db, month, result["category"])
+    result = {**result, "care_summary": notification_messages.care_summary(
+        result, observation.values, month, entries, observation.observed_at)}
     meta = inference.metadata()
     prediction = Prediction(pregnancy_id=observation.pregnancy_id, observation_id=oid,
                             model_version=meta["version"], result={**result, "model_version": meta["version"]})
@@ -436,7 +440,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
                         "remote_model": hosted_model.metadata() if hosted_model.configured() else None,
                         "assessment_model": inference.metadata()},
         "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
-        "notifications": [{"id": n.id, "message": notification_messages.care_update(prediction_results[n.prediction_id]) if n.prediction_id in prediction_results else n.message, "read": n.read, "created_at": n.created_at}
+        "notifications": [{"id": n.id, "message": prediction_results[n.prediction_id].get("care_summary") or notification_messages.care_update(prediction_results[n.prediction_id]) if n.prediction_id in prediction_results else n.message, "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
 
 @app.patch("/api/notifications/{nid}/read")
