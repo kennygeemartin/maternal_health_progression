@@ -1,0 +1,23 @@
+# Measurement action guidance
+
+Version: maternal-actions-2026-10-15-v1. This is a deterministic educational action layer, not an LLM, a diagnosis, a calibrated risk probability or a complete maternal early-warning score. It does not establish clinical validation of Bloom. Research classifier outputs remain separately stored with their model identity. Dataset coverage flags never decide the clinical action level.
+
+## Actions and sources
+
+- Blood pressure: either systolic >=160 or diastolic >=110 triggers immediate maternity assessment, using [NHS pregnancy hypertension](https://www.nhs.uk/pregnancy/existing-health-conditions/high-blood-pressure/) and [NICE NG133](https://www.nice.org.uk/guidance/ng133/chapter/recommendations). Elevated readings below that use the recheck timings in [Whittington maternity home monitoring](https://www.whittington.nhs.uk/mini-apps/leaflet/Default.asp?id=482&print=1): >=150 or >=100, review within four hours if persistent; >=140 or >=90, within 24 hours if persistent; >=135 or >=85, recheck and monitor daily. Immediate symptoms override rechecking. A low reading (<90 systolic or <60 diastolic) receives conservative same-day advice if persistent/unwell/on treatment, informed by [NHS hypotension](https://www.nhs.uk/conditions/low-blood-pressure-hypotension/). This conservative OR trigger is an application choice, not a diagnostic definition.
+- Temperature >=38 Celsius: immediate care, based on [CDC maternal warning signs](https://www.cdc.gov/hearher/maternal-warning-signs/index.html). Below 35: emergency advice, [NHS hypothermia](https://www.nhs.uk/conditions/hypothermia/). Intermediate unusual readings receive a recheck instruction.
+- Fasting glucose converts mg/dL /18.0182. Below 4 mmol/L prompts immediate low-glucose action and safe-swallowing precautions, based on [NHS hypoglycaemia](https://www.nhs.uk/conditions/low-blood-sugar-hypoglycaemia/). >=5.3 mmol/L is compared with the pregnancy-diabetes monitoring target in [NICE NG3](https://www.nice.org.uk/guidance/ng3/chapter/Recommendations). That target applies to diabetes management, not diagnosis in every pregnant woman. Same-day advice for a reading above that comparison is a conservative application policy; no diagnosis, prescription change or individual treatment target is inferred.
+- Pulse >120 or <40 receives urgent maternity advice; 100-120 or 40-50 receives a resting recheck and same-day contact if persistent. These thresholds reference the maternal chart in [NHS Education for Scotland appendices](https://www.cpdconnect.nhs.scot/media/2438/sepsis-appendices-20.pdf). This application does not calculate the full MEWS, which also needs observations not collected here.
+- Selected maternal warning symptoms trigger immediate care at every stage, using CDC warning signs. Reduced movement is evaluated by change from an established pattern, never a universal kick count or a minimum gestational age.
+
+The highest action takes precedence. A reassuring summary says only that no urgent threshold was detected in the entered readings; symptoms can override it. Missing measurements are never invented. Age, BMI and HbA1c do not independently set an acute action category. Month-specific published guidance is added separately. Gestational weeks from LMP determine the >=20-week blood-pressure context; month selection does not alter clinical thresholds or invent gestational dating.
+
+## Delivery and history
+
+Care checks run when a visit is saved and on dashboard reads, including visits without a successful prediction. Raised/urgent checks queue an opted-in, verified-address email independently of model availability. Observation identity deduplicates the save/predict email paths. Routine/monitor results appear in the dashboard; normal readings no longer generate an alert merely because they fall outside model training coverage. Existing prediction records and previously sent emails are preserved. Older measurements display the current version of the action rules; their timestamp stays visible. Stored context captures the selected month and dated weeks for new visits. Existing visits use their dated gestation as fallback.
+
+## Checks
+
+Boundary tests cover either blood-pressure component, Celsius/Fahrenheit equivalence, glucose conversion, pulse extremes, symptom overrides, early/later gestational context and model-outage email delivery. Providers are mocked in tests. Tests establish implemented behavior, not clinical validation.
+
+High-glucose emergency symptom advice follows [NHS hyperglycaemia](https://www.nhs.uk/conditions/high-blood-sugar-hyperglycaemia/).

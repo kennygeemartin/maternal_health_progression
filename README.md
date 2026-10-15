@@ -58,7 +58,7 @@ PostgreSQL deployments use a dedicated `bloom` schema, created automatically on 
 2. Connect a PostgreSQL database through Vercel Marketplace (for example Neon). The app accepts `DATABASE_URL` or `POSTGRES_URL` (with `DATABASE_URL` taking priority). Keep required SSL query parameters. Both `postgres://` and `postgresql://` are normalized to the installed psycopg driver.
 3. Set `APP_ENV=production` and `COOKIE_SECURE=true` for deployed environments. Use a separate PostgreSQL database for preview environments. SQLite is deliberately rejected on Vercel because function storage is not persistent.
 4. The lightweight Vercel runtime does not load PyTorch or download external executable model artifacts. The default numerical model runs with the Python standard library; its JSON weights are bundled explicitly. Optional external assessment runs at the configured provider.
-5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. The default bundled assessment requires no external-model consent or model token. Reference-range warnings produce a Review needed notice; no measurement is adjusted to fit a model. Optional external providers still require per-pregnancy consent. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
+5. Deploy, then verify `/api/health`, registration, a pregnancy profile, and measurement storage. The default bundled assessment requires no external-model consent or model token. Measurement action checks run independently of the research classifier and explain whether to continue monitoring, recheck, contact maternity care or seek urgent help; no measurement is adjusted to fit a model. Optional external providers still require per-pregnancy consent. Create the administrator against the deployed database from a trusted local environment using `python -m backend.create_admin`; credentials belong in environment settings, not GitHub.
 
 The configuration preserves the same-origin frontend/API and FastAPI security middleware. No database credentials or cloud access tokens are included. Vercel account access and a configured database are required to complete a live deployment.
 
@@ -106,3 +106,5 @@ The engine's outputs match native CatBoost to 1e-13 on 1,219 entirely synthetic 
 ## Shared visual identity
 
 A full-width maternal-care picture header appears on login, registration and every application view. Healthcare blue and warm rose accents replace the earlier green palette; locally hosted Manrope and Source Sans 3 improve readability. See [interface design, asset prompt and contrast checks](docs/interface-design.md).
+
+Action rules and sources: [Care assessment](docs/care-assessment.md). Warning symptoms can be recorded with each visit. Care summaries remain available even when research inference is unavailable.

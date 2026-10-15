@@ -66,5 +66,6 @@ def test_default_style_bundled_api_with_review_notice(monkeypatch):
         assert dashboard['preferences']['remote_model'] is None
         assert dashboard['preferences']['assessment_model']['status']=='bundled-research-model'
         assert not dashboard['preferences']['remote_assessment_enabled']
-        assert len(dashboard['notifications'])==1
+        assert not dashboard['notifications']
+        assert dashboard['observations'][0]['care_assessment']['level']=='routine'
         assert not dashboard['emails']

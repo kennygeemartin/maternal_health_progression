@@ -20,7 +20,7 @@ from .database import (initialize_database, SessionLocal, User, LoginSession, Pr
                        PregnancyPreferences, GuidanceMonth, EmailVerification, EmailJob, now)
 from . import inference
 from . import hosted_model, guidance_service, mail, monthly_catalog
-from . import notification_messages
+from . import notification_messages, care_assessment
 
 SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 if os.getenv("APP_ENV") == "production" and not SECURE:
@@ -348,6 +348,7 @@ class ObservationInput(Strict):
     observed_at: datetime
     values: Measurements
     units: dict[str, str]
+    symptoms: list[Literal["chest_breathing", "headache_vision", "bleeding_fluid", "severe_pain", "faint_confused", "cannot_drink", "reduced_movement", "severe_swelling"]] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_record(self):
@@ -365,13 +366,34 @@ def record(pid: int, data: ObservationInput, db: DB, user: AUTH):
     p = owned(db, user, pid)
     if data.observed_at.date() < p.lmp:
         raise HTTPException(422, "Observation predates this pregnancy")
+    month = guidance_service.selected_month(db, p)
+    weeks = max(0, (data.observed_at.date() - p.lmp).days // 7)
     observation = Observation(pregnancy_id=pid, observed_at=data.observed_at.astimezone(timezone.utc),
-                              values=data.values.model_dump(exclude_none=True), units=data.units)
+                              values={**data.values.model_dump(exclude_none=True), "_symptoms": list(dict.fromkeys(data.symptoms)),
+                                      "_care_context": {"month": month, "weeks": weeks}}, units=data.units)
     db.add(observation)
     db.flush()
     audit(db, user, "observation.create", observation.id)
     db.commit()
-    return {"id": observation.id}
+    assessment = observation_care(observation, p)
+    if assessment["level"] in {"urgent", "today"}:
+        preference = db.get(PregnancyPreferences, pid)
+        if preference and preference.email_enabled and mail.verified(db, user.id):
+            context = {"care_assessment": assessment}
+            context["care_summary"] = notification_messages.care_summary(context, observation.values, month,
+                guidance_service.content(db, month), observation.observed_at)
+            subject, body = notification_messages.care_email(context, user.name)
+            job = mail.queue(db, user, pid, "risk_alert", subject, body, f"observation:{observation.id}")
+            db.commit()
+            mail.dispatch(db, job)
+    return {"id": observation.id, "care_assessment": assessment}
+
+
+def observation_care(observation, pregnancy):
+    weeks = max(0, (observation.observed_at.date() - pregnancy.lmp).days // 7)
+    context = observation.values.get("_care_context", {})
+    return care_assessment.assess(observation.values, context.get("month", min(9, weeks // 4 + 1)),
+                                  context.get("weeks", weeks))
 
 @app.post("/api/observations/{oid}/predict")
 def predict(oid: int, db: DB, user: AUTH):
@@ -393,6 +415,7 @@ def predict(oid: int, db: DB, user: AUTH):
         raise HTTPException(503, "Assessment unavailable. " + (inference.UNIT_ISSUE if hosted_model.provider() == "disabled" else "Your measurements remain saved."))
     month = guidance_service.selected_month(db, pregnancy)
     entries = guidance_service.content(db, month, result["category"])
+    result = {**result, "care_assessment": observation_care(observation, pregnancy)}
     result = {**result, "care_summary": notification_messages.care_summary(
         result, observation.values, month, entries, observation.observed_at)}
     meta = inference.metadata()
@@ -404,8 +427,8 @@ def predict(oid: int, db: DB, user: AUTH):
     except IntegrityError:
         db.rollback()
         return db.scalar(select(Prediction).where(Prediction.observation_id == oid)).result
-    needs_review = result["category"] in {"mid", "high"} or result.get("review_required", False)
-    message = notification_messages.care_update(result)
+    needs_review = result["care_assessment"]["level"] in {"urgent", "today"}
+    message = result["care_assessment"]["label"] + ": " + result["care_assessment"]["findings"][0]["action"]
     if needs_review:
         db.add(Notification(user_id=user.id, pregnancy_id=observation.pregnancy_id, prediction_id=prediction.id,
                             message=message))
@@ -414,7 +437,7 @@ def predict(oid: int, db: DB, user: AUTH):
     if needs_review and preference and preference.email_enabled and mail.verified(db, user.id):
         subject, body = notification_messages.care_email(result, user.name)
         job = mail.queue(db, user, observation.pregnancy_id, "risk_alert", subject, body,
-            f"prediction:{prediction.id}")
+            f"observation:{observation.id}")
         db.commit()
         mail.dispatch(db, job)
     return notification_messages.display_result(prediction.result)
@@ -424,14 +447,15 @@ def dashboard(pid: int, db: DB, user: AUTH):
     p = owned(db, user, pid)
     observations = list(db.scalars(select(Observation).where(Observation.pregnancy_id == pid).order_by(Observation.observed_at, Observation.id)))
     predictions = {x.observation_id: x for x in db.scalars(select(Prediction).where(Prediction.pregnancy_id == pid))}
-    prediction_results = {x.id: x.result for x in predictions.values()}
+    care_checks = {o.id: observation_care(o, p) for o in observations}
+    prediction_results = {x.id: {**x.result, "care_assessment": care_checks[x.observation_id]} for x in predictions.values()}
     latest = predictions.get(observations[-1].id) if observations else None
     category = latest.result["category"] if latest else "all"
     month = guidance_service.selected_month(db, p)
     guidance = guidance_service.content(db, month, category)
     preference = db.get(PregnancyPreferences, pid)
     return {"pregnancy": pregnancy_json(p), "observations": [
-        {"id": o.id, "observed_at": o.observed_at.replace(tzinfo=timezone.utc), "values": o.values,
+        {"id": o.id, "observed_at": o.observed_at.replace(tzinfo=timezone.utc), "values": o.values, "care_assessment": care_checks[o.id],
          "prediction": notification_messages.display_result(predictions[o.id].result) if o.id in predictions else None} for o in observations],
         "guidance": guidance,
         "preferences": {"month": month, "email_enabled": bool(preference and preference.email_enabled),
@@ -440,7 +464,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
                         "remote_model": hosted_model.metadata() if hosted_model.configured() else None,
                         "assessment_model": inference.metadata()},
         "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
-        "notifications": [{"id": n.id, "message": notification_messages.display_text((prediction_results[n.prediction_id].get("care_summary") or notification_messages.care_update(prediction_results[n.prediction_id])) if n.prediction_id in prediction_results else n.message), "read": n.read, "created_at": n.created_at}
+        "notifications": [{"id": n.id, "message": notification_messages.display_text((notification_messages.care_update(prediction_results[n.prediction_id])) if n.prediction_id in prediction_results else n.message), "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
 
 @app.patch("/api/notifications/{nid}/read")

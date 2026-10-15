@@ -105,12 +105,12 @@ def test_external_consent_and_risk_email(monkeypatch):
         result=client.post(f'/api/observations/{oid}/predict',headers=HEADERS)
         assert result.status_code==200 and result.json()['category']=='high'
         assert len(calls)==1 and len(sent)==2
-        assert 'midwife or doctor' in sent[-1][2] and '135.137 mg/dL' in sent[-1][2]
+        assert 'Contact maternity care today' in sent[-1][2] and '135.137 mg/dL' in sent[-1][2]
         assert 'not a diagnosis' not in sent[-1][2]
         assert 'pregnancy month 5' in sent[-1][2]
         assert 'Mid-pregnancy checks' in sent[-1][2]
         assert 'Temperature: 37.0 ' in sent[-1][2]
-        assert sent[-1][2].endswith('whenever you need advice.')
+        assert sent[-1][2].endswith('follow the action timing above.')
         assert client.post(f'/api/observations/{oid}/predict',headers=HEADERS).status_code==200
         assert len(sent)==2
 

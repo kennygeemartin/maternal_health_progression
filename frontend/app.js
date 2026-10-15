@@ -123,11 +123,14 @@ function render() {
   $('trimester').textContent=['','First trimester','Second trimester','Third trimester'][p.stage];
   $('due-date').textContent='Estimated due date · '+dateText(p.due_date);
   $('pregnancy-progress').style.width=Math.min(100,p.weeks/40*100)+'%';
-  $('risk-content').innerHTML=result?`<span class="risk-badge ${result.category==='high'?'high':result.review_required?'mid':result.category}">${result.category==='high'?'Contact your care team':result.review_required?'Your care guidance':(result.category==='mid'?'Care team check-in':'Your latest check-in')}</span><p class="risk-description">${escapeHTML(result.care_summary || ('Share your readings and questions at your antenatal appointments.')).replace(/\n/g,'<br>')}</p>`:`<h2>${latest?'Assessment pending':'Ready for your check-in'}</h2><p class="risk-description">${latest?'Your visit is saved. You can retry your assessment from your measurement history.':'Log your measurements to receive a care summary and guidance for your pregnancy month.'}</p>`;
+  const care=latest?.care_assessment || result?.care_assessment;
+  const careColors={urgent:'high',today:'mid',monitor:'mid',routine:'low'};
+  const careHTML=care?`<small>Recorded ${escapeHTML(dateText(latest.observed_at))}</small><br><span class="risk-badge ${careColors[care.level]}">${escapeHTML(care.label)}</span>${care.findings.map(f=>`<div class="care-finding"><strong>${escapeHTML(f.title)}</strong><p>${escapeHTML(f.action)}</p><a href="${escapeHTML(f.source_url)}" target="_blank" rel="noopener noreferrer">Why this advice</a></div>`).join('')}<p>${escapeHTML(care.stage_advice)}</p><small>${escapeHTML(care.safety_note)}</small>`:null;
+  $('risk-content').innerHTML=careHTML || (result?`<h2>Your care guidance</h2><p>Log a new check-in to see actions for your current readings.</p>`:`<h2>Ready for your check-in</h2><p>Log your readings and any warning symptoms for a measurement-by-measurement care summary.</p>`);
   const metrics=[['Blood pressure',latest?`${latest.values.SystolicBP}/${latest.values.DiastolicBP}`:'—','mmHg'],['Heart rate',latest?.values.HeartRate??'—','bpm'],['Body temperature',temperatureC(latest?.values)??'—','°C'],['Fasting glucose',latest?.values.FastingGlucose??'—','mg/dL']];
   $('metric-cards').innerHTML=metrics.map(([name,value,unit])=>`<article class="metric"><div class="metric-label">${name}</div><div class="metric-value">${value}<small>${unit}</small></div><div class="metric-date">${latest?dateText(latest.observed_at):'No measurements yet'}</div></article>`).join('');
   renderTrend(obs);
-  $('history').innerHTML=obs.length?`<table><thead><tr><th>Visit</th>${fields.map(f=>`<th>${f[1]}<br>${f[2]}</th>`).join('')}<th>Assessment</th></tr></thead><tbody>${[...obs].reverse().map(o=>`<tr><td>${dateText(o.observed_at)}<br><small>${new Date(o.observed_at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></td>${fields.map(f=>`<td>${(f[0]==='BodyTempC'?temperatureC(o.values):o.values[f[0]])??'--'}</td>`).join('')}<td>${o.prediction?`<span class="risk-badge ${o.prediction.review_required?'mid':o.prediction.category}">${o.prediction.category==='high'?'Contact your care team':o.prediction.review_required?'Your care guidance':o.prediction.category+' risk'}</span>`:`<button class="text-button retry" data-id="${o.id}">Retry assessment</button>`}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Your history starts with your first measurement visit.</div>';
+  $('history').innerHTML=obs.length?`<table><thead><tr><th>Visit</th>${fields.map(f=>`<th>${f[1]}<br>${f[2]}</th>`).join('')}<th>Assessment</th></tr></thead><tbody>${[...obs].reverse().map(o=>`<tr><td>${dateText(o.observed_at)}<br><small>${new Date(o.observed_at).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></td>${fields.map(f=>`<td>${(f[0]==='BodyTempC'?temperatureC(o.values):o.values[f[0]])??'--'}</td>`).join('')}<td>${o.care_assessment?`<span class="risk-badge ${careColors[o.care_assessment.level]}">${escapeHTML(o.care_assessment.label)}</span>`:o.prediction?`<span class="risk-badge">Your care guidance</span>`:`<button class="text-button retry" data-id="${o.id}">Retry assessment</button>`}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">Your history starts with your first measurement visit.</div>';
   document.querySelectorAll('.retry').forEach(b=>b.addEventListener('click',async()=>{b.disabled=true;try{await api(`/observations/${b.dataset.id}/predict`,{method:'POST'});await loadDashboard();notify('Assessment complete.');}catch(e){notify(e.message,true);b.disabled=false;}}));
   $('guidance-list').innerHTML=guidance.length?guidance.map(g=>`<article class="card"><span class="eyebrow">PUBLISHED - ${g.scope==='month'?'MONTH '+g.month:'TRIMESTER GUIDANCE'}</span><h2>${escapeHTML(g.title)}</h2><p class="content-body">${escapeHTML(g.body)}</p><a href="${escapeHTML(g.source_url)}" target="_blank" rel="noopener noreferrer">Read source ↗</a></article>`).join(''):'<article class="card empty"><h2>Guidance is being prepared.</h2><p>No reviewed content has been published for your stage yet. Speak with your care team for personalised advice.</p></article>';
   $('guidance-teaser').textContent=guidance.length?guidance[0].title:'Reviewed guidance will appear here when your care team publishes it.';
@@ -163,8 +166,8 @@ function measurementFields(){
     const optional=['BMI','HbA1c'].includes(key);
     const bounds=ranges?.[providerNames[key]||key];
     const converted=bounds?.map(value=>key==='FastingGlucose'?(value*18.0182).toFixed(2):key==='BodyTempC'?((value-32)*5/9).toFixed(2):value);
-    return `<label>${label} (${unit})${optional?' (optional)':''}<input name="${key}" aria-describedby="limit-${key}" type="number" step="any" min="${min}" max="${max}" ${optional?'':'required'}><small id="limit-${key}">Record ${min} to ${max} ${unit}.${optional?' Not used for risk assessment.':''}${converted?` ${model?.status==='bundled-research-model'?'Source data covers':'Hosted assessment supports'} ${converted[0]} to ${converted[1]} ${unit}; ${model?.status==='bundled-research-model'?'scores outside this range need review':'this is a service limit'}, not a healthy range.`:''}</small></label>`;
-  }).join('');
+    return `<label>${label} (${unit})${optional?' (optional)':''}<input name="${key}" aria-describedby="limit-${key}" type="number" step="any" min="${min}" max="${max}" ${optional?'':'required'}><small id="limit-${key}">Record ${min} to ${max} ${unit}.${optional?' Not used for risk assessment.':''}</small></label>`;
+  }).join('') + `<fieldset class="full"><legend>Warning symptoms at this visit</legend><p>If any apply, seek help now. You can select more than one. Leave blank if none apply.</p>${Object.entries({chest_breathing:'Chest pain or difficulty breathing',headache_vision:'Severe or persistent headache, or vision changes',bleeding_fluid:'Bleeding more than spotting or leaking fluid',severe_pain:'Severe or persistent abdominal pain',faint_confused:'Fainting, confusion or a seizure',cannot_drink:'Vomiting and unable to keep fluids down',reduced_movement:"Baby moving less or a change in the usual pattern",severe_swelling:'Sudden severe swelling of face or hands'}).map(([key,label])=>`<label><input type="checkbox" name="symptoms" value="${key}"> ${label}</label>`).join('')}</fieldset>`;
 }
 function unsupportedModelFields(values){
   const ranges=state.dashboard?.preferences?.remote_model?.input_ranges;
@@ -189,7 +192,7 @@ $('add-measurement').addEventListener('click',()=>{
   $('measurement-range-status').textContent='';
   const current=new Date(); current.setMinutes(current.getMinutes()-current.getTimezoneOffset());
   $('measurement-form').elements.observed_at.value=current.toISOString().slice(0,16);
-  $('measurement-help').textContent='Enter actual readings using the units shown. Temperature is Celsius; glucose is mg/dL. Optional HbA1c is a percentage. '+(state.dashboard.preferences.assessment_model?.status==='bundled-research-model'?'The pretrained model runs inside Bloom. Readings outside its source data range are analysed with a review warning.':'Unsupported hosted-model readings can still be saved.')+' Never change a reading to fit a model.';
+  $('measurement-help').textContent='Enter actual readings in the units shown: temperature in Celsius and fasting glucose in mg/dL. Record warning symptoms as well as measurements.';
   $('measurement-dialog').showModal();
 });
 document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).close()));
@@ -199,10 +202,11 @@ $('measurement-form').addEventListener('submit',async e=>{
   const values=Object.fromEntries(fields.filter(f=>data[f[0]]!=='').map(f=>[f[0],Number(data[f[0]])]));
   const recordedUnits=Object.fromEntries(Object.keys(values).map(key=>[key,units[key]]));
   try{
-    const observation=await api(`/pregnancies/${state.pid}/observations`,{method:'POST',body:JSON.stringify({observed_at:new Date(data.observed_at).toISOString(),values,units:recordedUnits})});
-    $('measurement-dialog').close(); notify('Measurements saved. Running your assessment…');
-    try {if(unsupportedModelFields(values).length){notify('Measurements saved. Some readings are outside the hosted service limits; contact your care team for assessment.',true);}else{await api(`/observations/${observation.id}/predict`,{method:'POST'});notify('Measurements saved and assessment complete.');}}
-    catch(error){notify(error.message,true);}
+    const observation=await api(`/pregnancies/${state.pid}/observations`,{method:'POST',body:JSON.stringify({observed_at:new Date(data.observed_at).toISOString(),values,units:recordedUnits,symptoms:new FormData(e.target).getAll("symptoms")})});
+    $('measurement-dialog').close(); notify(observation.care_assessment?.label || 'Measurements saved.',observation.care_assessment?.level==='urgent');
+    await loadDashboard();
+    try {if(unsupportedModelFields(values).length){notify(observation.care_assessment.label,observation.care_assessment.level==='urgent');}else{await api(`/observations/${observation.id}/predict`,{method:'POST'});notify(observation.care_assessment?.label || 'Assessment complete.',observation.care_assessment?.level==='urgent');}}
+    catch(error){notify(observation.care_assessment?.label || error.message,observation.care_assessment?.level==='urgent');}
     await loadDashboard();
   }catch(error){$('measurement-error').textContent=error.message;}
   finally{$('measurement-submit').disabled=false;}

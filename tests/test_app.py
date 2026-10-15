@@ -64,7 +64,7 @@ def test_chronology_content_review_and_notifications(monkeypatch):
             user.role='admin'; db.commit()
         pid=client.post('/api/pregnancies',headers=HEADERS,json={'lmp':str(date.today()-timedelta(weeks=20))}).json()['id']
         for days in [0, 2]:
-            payload={'observed_at':(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),'values':VALUES,'units':UNITS}
+            payload={'observed_at':(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(),'values':{**VALUES, 'SystolicBP':150},'units':UNITS}
             oid=client.post(f'/api/pregnancies/{pid}/observations',headers=HEADERS,json=payload).json()['id']
             assert client.post(f'/api/observations/{oid}/predict',headers=HEADERS).status_code==200
         dash=client.get(f'/api/pregnancies/{pid}/dashboard').json()

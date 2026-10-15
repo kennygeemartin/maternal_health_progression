@@ -246,3 +246,7 @@ dialog{border:1px solid var(--line);border-radius:14px;padding:30px;max-width:66
 .auth-panel{padding:22px 18px}}
 
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+
+.care-finding{padding:1rem 0;border-bottom:1px solid #dde5eb}.care-finding p{margin:.5rem 0}.care-finding a{font-size:.875rem}fieldset.full{grid-column:1/-1;border:1px solid #ccd9e1;border-radius:12px;padding:1rem}fieldset.full label{display:block;margin:.8rem 0}fieldset.full input[type=checkbox]{width:auto;margin-right:.5rem}
+
+.notification>div{min-width:0}.notification p{white-space:pre-line;overflow-wrap:anywhere}

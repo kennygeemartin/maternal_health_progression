@@ -11,6 +11,9 @@ def guidance_body(body):
         " A low model estimate does not rule out a problem.", "")
 
 def care_update(result):
+    if result.get("care_assessment"):
+        from .care_assessment import text
+        return text(result["care_assessment"])
     if result.get("category") == "high":
         return ("Your latest assessment suggests you should contact your midwife or doctor promptly. "
                 "Share your readings and how you are feeling so your care team can advise on your next steps.")
@@ -46,20 +49,19 @@ def care_summary(result, values, month, entries, observed_at):
     if temperature is not None:
         readings.append(f"Temperature: {temperature:.1f} °C")
     sections = [f"Your check-in for pregnancy month {month}",
-                f"Recorded visit: {observed_at.isoformat()}",
-                "Your recorded measurements\n" + "\n".join(readings), care_update(result),
+                f"Recorded visit: {observed_at.isoformat()}", care_update(result),
+                "Your recorded measurements\n" + "\n".join(readings),
                 "Support for this stage of pregnancy"]
     for entry in entries:
         sections.append(f"{entry['title']}\n{guidance_body(entry['body'])}\nSource: {entry['source_url']}")
     if not entries:
         sections.append("Bring your questions about symptoms, daily activities and upcoming appointments to your care team.")
-    sections.extend(["For your next conversation\nShare when these readings were taken, any symptoms or changes you have noticed, "
-                     "and medicines or supplements you take. Ask what follow-up measurements or appointments are appropriate for you.",
-                     VISIT_RECOMMENDATION])
+    sections.append("Continue your scheduled antenatal care and follow the action timing above.")
     return "\n\n".join(sections)
 
 def care_email(result, name):
-    return ("Bloom: a check-in with your care team",
+    subject = "Bloom: " + result["care_assessment"]["label"] if result.get("care_assessment") else "Bloom: your pregnancy care update"
+    return (subject,
             f"Hello {name},\n\nYour pregnancy care update\n\n"
             "You can open Bloom to see your measurements and manage your email preferences.\n\n" +
             display_text(result.get("care_summary", care_update(result))))
