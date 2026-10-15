@@ -38,7 +38,8 @@ def test_units_stage_and_no_imputation():
     assert assess({},1)['level']!='routine'
 
 
-def test_urgent_actions_and_email_work_when_model_is_unavailable(monkeypatch):
+@pytest.mark.parametrize("level", ["urgent", "routine"])
+def test_actions_and_full_email_work_when_model_is_unavailable(monkeypatch, level):
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
     monkeypatch.setenv("APP_ENV", "test")
     from fastapi.testclient import TestClient
@@ -54,23 +55,26 @@ def test_urgent_actions_and_email_work_when_model_is_unavailable(monkeypatch):
     monkeypatch.setattr(inference,'predict',lambda values: (_ for _ in ()).throw(RuntimeError('offline')))
     h={'X-Bloom-Request':'1'}
     with TestClient(app) as client:
-        assert client.post('/api/auth/register',headers=h,json={'name':'Synthetic Check','email':'actions@example.invalid','password':'test-password-123'}).status_code==201
+        assert client.post('/api/auth/register',headers=h,json={'name':'Synthetic Check','email':f'actions-{level}@example.invalid','password':'test-password-123'}).status_code==201
         pid=client.post('/api/pregnancies',headers=h,json={'lmp':str(date.today()),'month':1}).json()['id']
         with SessionLocal() as db:
-            user=db.scalar(select(User).where(User.email=='actions@example.invalid'))
+            user=db.scalar(select(User).where(User.email==f'actions-{level}@example.invalid'))
             db.add(EmailVerification(user_id=user.id,verified_at=datetime.now(timezone.utc)));db.commit()
         client.put(f'/api/pregnancies/{pid}/preferences',headers=h,json={'month':1,'email_enabled':True})
         units={'Age':'years','SystolicBP':'mmHg','DiastolicBP':'mmHg','FastingGlucose':'mg/dL','BodyTempC':'degC','HeartRate':'bpm'}
-        payload={'observed_at':datetime.now(timezone.utc).isoformat(),'values':{**VALUES,'SystolicBP':160},'units':units,'symptoms':['headache_vision']}
+        payload={'observed_at':datetime.now(timezone.utc).isoformat(),'values':{**VALUES,'SystolicBP':160 if level=='urgent' else 112},'units':units,'symptoms':['headache_vision'] if level=='urgent' else []}
         response=client.post(f'/api/pregnancies/{pid}/observations',headers=h,json=payload)
         assert response.status_code==201,response.text
-        assert response.json()['care_assessment']['level']=='urgent'
-        assert 'Get medical help now' in sent[-1][2]
+        assert response.json()['care_assessment']['level']==level
+        assert ('Get medical help now' if level=='urgent' else 'No urgent threshold detected') in sent[-1][2]
+        assert 'Your recorded measurements' in sent[-1][2]
+        assert 'Source: https://' in sent[-1][2]
+        assert 'Support for this stage of pregnancy' in sent[-1][2]
         count=len(sent)
         oid=response.json()['id']
         assert client.post(f'/api/observations/{oid}/predict',headers=h).status_code==503
         dash=client.get(f'/api/pregnancies/{pid}/dashboard').json()
-        assert dash['observations'][0]['care_assessment']['level']=='urgent'
+        assert dash['observations'][0]['care_assessment']['level']==level
         assert dash['observations'][0]['prediction'] is None
         assert len(sent)==count
         payload['symptoms']=['unrecognised']

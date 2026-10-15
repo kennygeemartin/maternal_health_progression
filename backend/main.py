@@ -376,16 +376,15 @@ def record(pid: int, data: ObservationInput, db: DB, user: AUTH):
     audit(db, user, "observation.create", observation.id)
     db.commit()
     assessment = observation_care(observation, p)
-    if assessment["level"] in {"urgent", "today"}:
-        preference = db.get(PregnancyPreferences, pid)
-        if preference and preference.email_enabled and mail.verified(db, user.id):
-            context = {"care_assessment": assessment}
-            context["care_summary"] = notification_messages.care_summary(context, observation.values, month,
-                guidance_service.content(db, month), observation.observed_at)
-            subject, body = notification_messages.care_email(context, user.name)
-            job = mail.queue(db, user, pid, "risk_alert", subject, body, f"observation:{observation.id}")
-            db.commit()
-            mail.dispatch(db, job)
+    preference = db.get(PregnancyPreferences, pid)
+    if preference and preference.email_enabled and mail.verified(db, user.id):
+        context = {"care_assessment": assessment}
+        context["care_summary"] = notification_messages.care_summary(context, observation.values, month,
+            guidance_service.content(db, month), observation.observed_at)
+        subject, body = notification_messages.care_email(context, user.name)
+        job = mail.queue(db, user, pid, "risk_alert" if assessment["level"] in {"urgent", "today"} else "care_update", subject, body, f"observation:{observation.id}")
+        db.commit()
+        mail.dispatch(db, job)
     return {"id": observation.id, "care_assessment": assessment}
 
 
