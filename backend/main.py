@@ -381,7 +381,7 @@ def predict(oid: int, db: DB, user: AUTH):
     pregnancy = owned(db, user, observation.pregnancy_id)
     existing = db.scalar(select(Prediction).where(Prediction.observation_id == oid))
     if existing:
-        return existing.result
+        return notification_messages.display_result(existing.result)
     preference = db.get(PregnancyPreferences, observation.pregnancy_id)
     if hosted_model.configured() and (not preference or not preference.remote_assessment_enabled):
         raise HTTPException(409, "Enable external research assessments in your pregnancy preferences before sending measurements to the hosted model.")
@@ -417,7 +417,7 @@ def predict(oid: int, db: DB, user: AUTH):
             f"prediction:{prediction.id}")
         db.commit()
         mail.dispatch(db, job)
-    return prediction.result
+    return notification_messages.display_result(prediction.result)
 
 @app.get("/api/pregnancies/{pid}/dashboard")
 def dashboard(pid: int, db: DB, user: AUTH):
@@ -432,7 +432,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
     preference = db.get(PregnancyPreferences, pid)
     return {"pregnancy": pregnancy_json(p), "observations": [
         {"id": o.id, "observed_at": o.observed_at.replace(tzinfo=timezone.utc), "values": o.values,
-         "prediction": predictions[o.id].result if o.id in predictions else None} for o in observations],
+         "prediction": notification_messages.display_result(predictions[o.id].result) if o.id in predictions else None} for o in observations],
         "guidance": guidance,
         "preferences": {"month": month, "email_enabled": bool(preference and preference.email_enabled),
                         "email_verified": mail.verified(db, user.id), "email_configured": mail.configured(),
@@ -440,7 +440,7 @@ def dashboard(pid: int, db: DB, user: AUTH):
                         "remote_model": hosted_model.metadata() if hosted_model.configured() else None,
                         "assessment_model": inference.metadata()},
         "emails": [mail.summary(job) for job in db.scalars(select(EmailJob).where(EmailJob.user_id == user.id, EmailJob.pregnancy_id == pid).order_by(EmailJob.id.desc()).limit(20))],
-        "notifications": [{"id": n.id, "message": prediction_results[n.prediction_id].get("care_summary") or notification_messages.care_update(prediction_results[n.prediction_id]) if n.prediction_id in prediction_results else n.message, "read": n.read, "created_at": n.created_at}
+        "notifications": [{"id": n.id, "message": notification_messages.display_text((prediction_results[n.prediction_id].get("care_summary") or notification_messages.care_update(prediction_results[n.prediction_id])) if n.prediction_id in prediction_results else n.message), "read": n.read, "created_at": n.created_at}
                           for n in db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.pregnancy_id == pid).order_by(Notification.created_at.desc()))]}
 
 @app.patch("/api/notifications/{nid}/read")

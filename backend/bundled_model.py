@@ -73,4 +73,4 @@ def predict(values):
         "probabilities": probabilities, "outside_training_range": outside,
         "review_required": bool(outside), "source": load()["source_url"],
         "source_revision": load()["source_revision"], "assessment_mode": "bundled",
-        "review_message": "Some readings are outside the source dataset range. The research scores may be unreliable; contact your maternity care team for assessment." if outside else None}
+        "review_message": "Share your recorded measurements with your maternity care team for personalised advice." if outside else None}

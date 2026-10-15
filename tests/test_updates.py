@@ -193,6 +193,20 @@ def test_care_summary_coverage_is_not_a_clinical_abnormality():
     result = {'category': 'low', 'review_required': True}
     body = care_summary(result, {'BodyTempC': 37, 'FastingGlucose': 88}, 2, [], datetime(2026, 10, 15))
     assert '88 mg/dL' in body and '37.0' in body
-    assert 'does not mean those readings are unhealthy' in body
+    assert 'outside' not in body
+    assert 'advice tailored to you' in body
     assert 'Blood pressure:' not in body and 'HbA1c:' not in body
     assert 'promptly' in care_update({'category': 'high', 'review_required': True})
+
+
+def test_retired_range_copy_removed_from_historical_results():
+    from backend.notification_messages import display_result, display_text
+    original = {"review_message": "Some readings are outside the source dataset range. Contact your care team.",
+                "care_summary": "Some readings fall outside the model's reference data, so its score cannot reliably explain them. This alone does not mean those readings are unhealthy. Share your record.",
+                "review_required": True}
+    refreshed = display_result(original)
+    assert refreshed['review_message'] == 'Contact your care team.'
+    assert refreshed['care_summary'] == 'Share your record.'
+    assert refreshed['review_required'] is True
+    assert 'outside' in original['review_message']
+    assert display_text('Contact your care team promptly.') == 'Contact your care team promptly.'

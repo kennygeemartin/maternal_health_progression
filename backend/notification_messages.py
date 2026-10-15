@@ -14,14 +14,21 @@ def care_update(result):
     if result.get("category") == "high":
         return ("Your latest assessment suggests you should contact your midwife or doctor promptly. "
                 "Share your readings and how you are feeling so your care team can advise on your next steps.")
-    if result.get("review_required") or result.get("outside_training_range"):
-        return ("Your measurements are saved. Some readings fall outside the model's reference data, "
-                "so its score cannot reliably explain them. This alone does not mean those readings are unhealthy. "
-                "Share your record with your midwife or doctor for advice tailored to you.")
-    return ("Thank you for checking in on your health. Your latest readings need attention from your care team. "
-                "Please contact your midwife or doctor promptly to arrange a professional review and discuss your next steps.")
-    return ("Thank you for keeping up with your pregnancy check-ins. Your latest readings would benefit from a care-team review. "
-            "Please arrange a visit with your midwife or doctor to discuss your measurements and plan your next steps together.")
+    return ("Your measurements are saved. Share your record with your midwife or doctor "
+            "for advice tailored to you and your next steps.")
+
+
+def display_text(text):
+    """Refresh retired copy in historical summaries without changing saved records."""
+    return text.replace("Some readings are outside the source dataset range. ", "").replace(
+        "Some readings fall outside the model's reference data, so its score cannot reliably explain them. "
+        "This alone does not mean those readings are unhealthy. ", "")
+
+
+def display_result(result):
+    return {key: display_text(value) if key in {"care_summary", "review_message"} and isinstance(value, str)
+            else value for key, value in result.items()}
+
 
 def care_summary(result, values, month, entries, observed_at):
     """Assemble approved education and actual readings; no generated clinical claims."""
@@ -55,4 +62,4 @@ def care_email(result, name):
     return ("Bloom: a check-in with your care team",
             f"Hello {name},\n\nYour pregnancy care update\n\n"
             "You can open Bloom to see your measurements and manage your email preferences.\n\n" +
-            result.get("care_summary", care_update(result)))
+            display_text(result.get("care_summary", care_update(result))))
